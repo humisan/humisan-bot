@@ -650,33 +650,73 @@ class Music(commands.Cog):
             )
             return
 
+        # キュー統計情報を計算
+        total_duration = 0
+        if queue.current and queue.current.get('duration'):
+            total_duration += queue.current['duration']
+
+        for song in queue.queue:
+            if song.get('duration'):
+                total_duration += song['duration']
+
+        queue_count = len(queue.queue)
+        total_songs = (1 if queue.current else 0) + queue_count
+
         embed = discord.Embed(
-            title="📜 音楽キュー",
-            color=discord.Color.blue()
+            title="📜 キュー情報",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
         )
 
+        # 現在再生中の曲
         if queue.current:
             position = queue.get_position()
-            duration_text = self.format_duration(queue.current['duration']) if queue.current['duration'] else "不明"
+            duration = queue.current.get('duration', 0)
+            duration_text = self.format_duration(duration) if duration else "不明"
             position_text = self.format_duration(position)
+
+            # 進捗バーを作成（20文字の長さ）
+            if duration > 0:
+                progress = int((position / duration) * 20)
+                progress_bar = "█" * progress + "░" * (20 - progress)
+            else:
+                progress_bar = "░" * 20
+
+            current_info = f"**{queue.current['title']}**\n"
+            current_info += f"`{progress_bar}` {position_text} / {duration_text}\n"
+            current_info += f"リクエスト: {queue.current.get('requester', '不明')}"
+
             embed.add_field(
                 name="🎵 再生中",
-                value=f"{queue.current['title']}\n{position_text} / {duration_text}",
+                value=current_info,
                 inline=False
             )
 
+        # キュー内の次の曲
         if not queue.is_empty():
+            songs_per_page = 10
             queue_text = ""
-            for i, song in enumerate(queue.queue[:10], 1):
-                duration = self.format_duration(song['duration']) if song['duration'] else "不明"
-                queue_text += f"{i}. {song['title']} ({duration})\n"
 
-            if len(queue.queue) > 10:
-                queue_text += f"\n... 他 {len(queue.queue) - 10} 曲"
+            for i, song in enumerate(queue.queue[:songs_per_page], 1):
+                duration = self.format_duration(song['duration']) if song.get('duration') else "不明"
+                title = song['title']
+                # タイトルが長い場合は短縮
+                if len(title) > 50:
+                    title = title[:47] + "..."
+                queue_text += f"`{i:2d}.` {title}\n"
+                queue_text += f"      ⏱️ {duration}\n"
 
-            embed.add_field(name="次の曲", value=queue_text, inline=False)
+            if queue_count > songs_per_page:
+                remaining = queue_count - songs_per_page
+                queue_text += f"\n*... 他 {remaining} 曲*"
 
-        # ステータス
+            embed.add_field(
+                name=f"⏭️ キュー ({queue_count} 曲)",
+                value=queue_text or "キューが空です",
+                inline=False
+            )
+
+        # ステータスと統計
         status = []
         if queue.repeat_mode == RepeatMode.ONE:
             status.append("🔁 1曲リピート")
@@ -685,8 +725,16 @@ class Music(commands.Cog):
         if queue.shuffle:
             status.append("🔀 シャッフル")
 
-        if status:
-            embed.add_field(name="ステータス", value=" | ".join(status), inline=False)
+        status_text = " | ".join(status) if status else "通常モード"
+
+        total_duration_text = self.format_duration(total_duration)
+        stats_text = f"**曲数:** {total_songs}\n"
+        stats_text += f"**総再生時間:** {total_duration_text}"
+
+        embed.add_field(name="📊 統計", value=stats_text, inline=True)
+        embed.add_field(name="⚙️ ステータス", value=status_text, inline=True)
+
+        embed.set_footer(text=f"ボイスチャネル接続状態: {'接続中' if interaction.guild.voice_client else '未接続'}")
 
         await interaction.response.send_message(embed=embed)
 
