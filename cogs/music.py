@@ -271,15 +271,21 @@ class Music(commands.Cog):
                 # プレイリストの場合
                 for entry in data['entries']:
                     if entry:
-                        song = {
-                            'url': entry.get('url'),
-                            'title': entry.get('title', 'Unknown'),
-                            'duration': entry.get('duration', 0),
-                            'thumbnail': entry.get('thumbnail'),
-                            'requester': interaction.user,
-                            'webpage_url': entry.get('webpage_url')
-                        }
-                        songs_to_add.append(song)
+                        # extract_flat を使用している場合、webpage_url が None になる可能性があるので、id から URL を構築
+                        webpage_url = entry.get('webpage_url')
+                        if not webpage_url and entry.get('id'):
+                            webpage_url = f"https://www.youtube.com/watch?v={entry.get('id')}"
+
+                        if webpage_url:  # URL が取得できた場合のみ追加
+                            song = {
+                                'url': entry.get('url'),
+                                'title': entry.get('title', 'Unknown'),
+                                'duration': entry.get('duration', 0),
+                                'thumbnail': entry.get('thumbnail'),
+                                'requester': interaction.user,
+                                'webpage_url': webpage_url
+                            }
+                            songs_to_add.append(song)
 
                 if not songs_to_add:
                     await interaction.followup.send(
@@ -288,13 +294,17 @@ class Music(commands.Cog):
                     return
             else:
                 # 単一の曲の場合
+                webpage_url = data.get('webpage_url')
+                if not webpage_url and data.get('id'):
+                    webpage_url = f"https://www.youtube.com/watch?v={data.get('id')}"
+
                 song = {
-                    'url': data['url'],
+                    'url': data.get('url'),
                     'title': data['title'],
                     'duration': data.get('duration', 0),
                     'thumbnail': data.get('thumbnail'),
                     'requester': interaction.user,
-                    'webpage_url': data.get('webpage_url')
+                    'webpage_url': webpage_url
                 }
                 songs_to_add.append(song)
 
