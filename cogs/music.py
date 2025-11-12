@@ -1152,10 +1152,7 @@ class SearchView(discord.ui.View):
             song = self.all_songs[index]
             query = song['webpage_url']
 
-            # interaction を defer して play コマンドを実行
-            await interaction.response.defer()
-
-            # play コマンドを実行
+            # play コマンドを実行（play内で defer されるため、ここでは defer しない）
             await self.music_cog.play(interaction, query)
 
         return callback
