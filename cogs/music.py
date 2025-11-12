@@ -83,6 +83,7 @@ class MusicQueue:
         self.shuffle = False
         self.history: List[Dict] = []
         self.start_time = None
+        self.notification_channel_id: int = None  # /play が実行されたチャネル ID
 
     def add(self, song: Dict):
         """曲をキューに追加"""
@@ -145,7 +146,6 @@ class Music(commands.Cog):
         self.playlists_file = 'playlists.json'
         self.playlists = self.load_playlists()
         self.skip_votes: Dict[int, set] = {}  # guild_id -> {user_ids}
-        self.notification_channels: Dict[int, int] = {}  # guild_id -> channel_id
 
     def load_favorites(self):
         """お気に入りを読み込む"""
@@ -311,6 +311,10 @@ class Music(commands.Cog):
 
             queue = self.get_queue(interaction.guild.id)
             first_song = songs_to_add[0]
+
+            # チャネル ID を保存（通知用）
+            if queue.notification_channel_id is None:
+                queue.notification_channel_id = interaction.channel.id
 
             # キューに曲が入っていない場合のみ即座に再生
             if queue.current is None and not voice_client.is_playing():
@@ -614,30 +618,6 @@ class Music(commands.Cog):
         voice_client.stop()
         await interaction.response.send_message(embed=create_success_embed("⏹️ 停止", "音楽を停止してキューをクリアしました"))
 
-    @app_commands.command(name='setnowplayingchannel', description='再生中の曲情報を送信するチャネルを設定します')
-    @app_commands.describe(channel='曲情報を送信するテキストチャネル')
-    async def set_now_playing_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        """再生中の曲情報を送信するチャネルを設定"""
-        if not interaction.guild:
-            await interaction.response.send_message(
-                embed=create_error_embed("このコマンドはギルド内でのみ使用可能です"),
-                ephemeral=True
-            )
-            return
-
-        # チャネルへの送信権限を確認
-        if not channel.permissions_for(interaction.guild.me).send_messages:
-            await interaction.response.send_message(
-                embed=create_error_embed("選択したチャネルに送信権限がありません"),
-                ephemeral=True
-            )
-            return
-
-        self.notification_channels[interaction.guild.id] = channel.id
-        await interaction.response.send_message(
-            embed=create_success_embed("通知チャネル設定", f"{channel.mention} に曲情報を送信するように設定しました")
-        )
-
     @app_commands.command(name='queue', description='現在のキューを表示します')
     async def queue_command(self, interaction: discord.Interaction):
         """キューを表示"""
@@ -752,8 +732,8 @@ class Music(commands.Cog):
                     voice_client.play(player, after=lambda e: self.play_next(guild))
 
                     # 通知チャネルに embed を送信
-                    if guild.id in self.notification_channels:
-                        channel = guild.get_channel(self.notification_channels[guild.id])
+                    if queue.notification_channel_id:
+                        channel = guild.get_channel(queue.notification_channel_id)
                         if channel:
                             embed = discord.Embed(
                                 title="🎵 再生中",
