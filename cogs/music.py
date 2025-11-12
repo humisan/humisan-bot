@@ -681,81 +681,11 @@ class Music(commands.Cog):
         queue_count = len(queue.queue)
         total_songs = (1 if queue.current else 0) + queue_count
 
-        embed = discord.Embed(
-            title="📜 キュー情報",
-            color=discord.Color.blue(),
-            timestamp=discord.utils.utcnow()
-        )
+        # QueueView を作成
+        view = QueueView(self, queue, total_duration, total_songs, interaction.user)
+        embed = view.get_embed()
 
-        # 現在再生中の曲
-        if queue.current:
-            position = queue.get_position()
-            duration = queue.current.get('duration', 0)
-            duration_text = self.format_duration(duration) if duration else "不明"
-            position_text = self.format_duration(position)
-
-            # 進捗バーを作成（20文字の長さ）
-            if duration > 0:
-                progress = int((position / duration) * 20)
-                progress_bar = "█" * progress + "░" * (20 - progress)
-            else:
-                progress_bar = "░" * 20
-
-            current_info = f"**{queue.current['title']}**\n"
-            current_info += f"`{progress_bar}` {position_text} / {duration_text}\n"
-            current_info += f"リクエスト: {queue.current.get('requester', '不明')}"
-
-            embed.add_field(
-                name="🎵 再生中",
-                value=current_info,
-                inline=False
-            )
-
-        # キュー内の次の曲
-        if not queue.is_empty():
-            songs_per_page = 10
-            queue_text = ""
-
-            for i, song in enumerate(queue.queue[:songs_per_page], 1):
-                duration = self.format_duration(song['duration']) if song.get('duration') else "不明"
-                title = song['title']
-                # タイトルが長い場合は短縮
-                if len(title) > 50:
-                    title = title[:47] + "..."
-                queue_text += f"`{i:2d}.` {title}\n"
-                queue_text += f"      ⏱️ {duration}\n"
-
-            if queue_count > songs_per_page:
-                remaining = queue_count - songs_per_page
-                queue_text += f"\n*... 他 {remaining} 曲*"
-
-            embed.add_field(
-                name=f"⏭️ キュー ({queue_count} 曲)",
-                value=queue_text or "キューが空です",
-                inline=False
-            )
-
-        # ステータスと統計
-        status = []
-        if queue.repeat_mode == RepeatMode.ONE:
-            status.append("🔁 1曲リピート")
-        elif queue.repeat_mode == RepeatMode.ALL:
-            status.append("🔁 全曲リピート")
-        if queue.shuffle:
-            status.append("🔀 シャッフル")
-
-        status_text = " | ".join(status) if status else "通常モード"
-
-        total_duration_text = self.format_duration(total_duration)
-        stats_text = f"**曲数:** {total_songs}\n"
-        stats_text += f"**総再生時間:** {total_duration_text}"
-
-        embed.add_field(name="📊 統計", value=stats_text, inline=True)
-        embed.add_field(name="⚙️ ステータス", value=status_text, inline=True)
-
-        embed.set_footer(text=f"ボイスチャネル接続状態: {'接続中' if interaction.guild.voice_client else '未接続'}")
-
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name='leave', description='ボイスチャネルから退出します')
     async def leave(self, interaction: discord.Interaction):
@@ -1109,6 +1039,154 @@ class MusicControlView(discord.ui.View):
             await interaction.response.send_message(f"🔉 音量: {percentage}%", ephemeral=True)
         else:
             await interaction.response.send_message("再生中の音楽がありません", ephemeral=True)
+
+
+class QueueView(discord.ui.View):
+    """キュー表示用のボタンビュー（ページネーション対応）"""
+
+    def __init__(self, music_cog, queue, total_duration, total_songs, requester):
+        super().__init__(timeout=300)
+        self.music_cog = music_cog
+        self.queue = queue
+        self.total_duration = total_duration
+        self.total_songs = total_songs
+        self.requester = requester
+        self.page = 0
+        self.songs_per_page = 10
+        self.update_buttons()
+
+    def get_embed(self) -> discord.Embed:
+        """現在のページの embed を生成"""
+        embed = discord.Embed(
+            title="📜 キュー情報",
+            color=discord.Color.blue(),
+            timestamp=discord.utils.utcnow()
+        )
+
+        # 現在再生中の曲
+        if self.queue.current:
+            position = self.queue.get_position()
+            duration = self.queue.current.get('duration', 0)
+            duration_text = self.music_cog.format_duration(duration) if duration else "不明"
+            position_text = self.music_cog.format_duration(position)
+
+            # 進捗バーを作成（20文字の長さ）
+            if duration > 0:
+                progress = int((position / duration) * 20)
+                progress_bar = "█" * progress + "░" * (20 - progress)
+            else:
+                progress_bar = "░" * 20
+
+            current_info = f"**{self.queue.current['title']}**\n"
+            current_info += f"`{progress_bar}` {position_text} / {duration_text}\n"
+            current_info += f"リクエスト: {self.queue.current.get('requester', '不明')}"
+
+            embed.add_field(
+                name="🎵 再生中",
+                value=current_info,
+                inline=False
+            )
+
+        # キュー内の次の曲（ページネーション）
+        if not self.queue.is_empty():
+            queue_count = len(self.queue.queue)
+            start_idx = self.page * self.songs_per_page
+            end_idx = start_idx + self.songs_per_page
+            current_songs = self.queue.queue[start_idx:end_idx]
+
+            queue_text = f"**ページ {self.page + 1}/{(queue_count + self.songs_per_page - 1) // self.songs_per_page}**\n\n"
+
+            for i, song in enumerate(current_songs):
+                duration = self.music_cog.format_duration(song['duration']) if song.get('duration') else "不明"
+                title = song['title']
+                # タイトルが長い場合は短縮
+                if len(title) > 50:
+                    title = title[:47] + "..."
+                queue_text += f"`{start_idx + i + 1:2d}.` {title}\n"
+                queue_text += f"      ⏱️ {duration}\n"
+
+            embed.add_field(
+                name=f"⏭️ キュー ({queue_count} 曲)",
+                value=queue_text or "キューが空です",
+                inline=False
+            )
+
+        # ステータスと統計
+        status = []
+        if self.queue.repeat_mode == RepeatMode.ONE:
+            status.append("🔁 1曲リピート")
+        elif self.queue.repeat_mode == RepeatMode.ALL:
+            status.append("🔁 全曲リピート")
+        if self.queue.shuffle:
+            status.append("🔀 シャッフル")
+
+        status_text = " | ".join(status) if status else "通常モード"
+
+        total_duration_text = self.music_cog.format_duration(self.total_duration)
+        stats_text = f"**曲数:** {self.total_songs}\n"
+        stats_text += f"**総再生時間:** {total_duration_text}"
+
+        embed.add_field(name="📊 統計", value=stats_text, inline=True)
+        embed.add_field(name="⚙️ ステータス", value=status_text, inline=True)
+
+        embed.set_footer(text=f"ボイスチャネル接続状態: {'接続中' if self.queue else '未接続'}")
+
+        return embed
+
+    def update_buttons(self):
+        """現在のページに応じてボタンを更新"""
+        self.clear_items()
+
+        queue_count = len(self.queue.queue)
+
+        # ナビゲーションボタン
+        if self.page > 0:
+            prev_button = discord.ui.Button(label="← 前へ", style=discord.ButtonStyle.secondary)
+            prev_button.callback = self.prev_page
+            self.add_item(prev_button)
+
+        # ページ情報
+        total_pages = (queue_count + self.songs_per_page - 1) // self.songs_per_page if queue_count > 0 else 1
+        page_button = discord.ui.Button(
+            label=f"ページ {self.page + 1}/{total_pages}",
+            style=discord.ButtonStyle.secondary,
+            disabled=True
+        )
+        self.add_item(page_button)
+
+        if (self.page + 1) * self.songs_per_page < queue_count:
+            next_button = discord.ui.Button(label="次へ →", style=discord.ButtonStyle.secondary)
+            next_button.callback = self.next_page
+            self.add_item(next_button)
+
+    async def prev_page(self, interaction: discord.Interaction):
+        """前のページへ"""
+        if interaction.user != self.requester:
+            await interaction.response.send_message(
+                embed=create_error_embed("このボタンは使用できません"),
+                ephemeral=True
+            )
+            return
+
+        if self.page > 0:
+            self.page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def next_page(self, interaction: discord.Interaction):
+        """次のページへ"""
+        if interaction.user != self.requester:
+            await interaction.response.send_message(
+                embed=create_error_embed("このボタンは使用できません"),
+                ephemeral=True
+            )
+            return
+
+        queue_count = len(self.queue.queue)
+        if (self.page + 1) * self.songs_per_page < queue_count:
+            self.page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
 
 class SearchView(discord.ui.View):
