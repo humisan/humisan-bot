@@ -237,6 +237,8 @@ class Music(commands.Cog):
         # ボイスチャネルに接続
         if not voice_client:
             voice_client = await voice_channel.connect()
+            # ボットをデフォン状態に設定（常にスピーカーミュート）
+            await interaction.guild.me.edit(deafen=True)
 
         try:
             # 曲情報を取得（タイムアウト付き）
