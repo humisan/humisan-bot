@@ -180,8 +180,8 @@ class Music(commands.Cog):
         """秒を MM:SS 形式に変換"""
         if not seconds:
             return "0:00"
-        minutes = seconds // 60
-        secs = seconds % 60
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
         return f"{minutes}:{secs:02d}"
 
     async def search_songs(self, query: str, limit: int = 5):
