@@ -98,15 +98,10 @@ async def on_ready():
     logger.info(f'{bot.user} has connected to Discord!')
     logger.info(f'Bot is ready! Currently in {len(bot.guilds)} guilds.')
 
-    # ボットのステータスを設定
+    # ボットのステータスを設定（常に idle を維持）
     activity = discord.Activity(type=discord.ActivityType.watching, name="/help で コマンド一覧を表示")
     await bot.change_presence(status=discord.Status.idle, activity=activity)
-    logger.info("Bot status set to idle")
-
-    # ステータス更新タスクを開始
-    if not update_status_from_music.is_running():
-        update_status_from_music.start()
-        logger.info("Status update task started")
+    logger.info("Bot status set to idle (always)")
 
     try:
         logger.info("Syncing application commands (Global)...")
@@ -154,48 +149,7 @@ async def on_guild_remove(guild: discord.Guild):
     """ボットがギルドから削除された時のイベント"""
     logger.info(f'Left guild: {guild.name} (ID: {guild.id})')
 
-last_status = {"title": None}  # 前回のステータスを記録
-
-@tasks.loop(seconds=30)
-async def update_status_from_music():
-    """定期的に音楽再生状況に応じてステータスを更新"""
-    try:
-        # Music cog を取得
-        music_cog = bot.get_cog('Music')
-        if not music_cog:
-            return
-
-        # 再生中の曲を探す
-        current_song = None
-        for guild_id, queue in music_cog.queues.items():
-            if queue.current:
-                current_song = queue.current
-                break
-
-        # ステータスを更新（ステータスが変わった場合のみ）
-        if current_song:
-            # 曲が再生中の場合
-            title = current_song.get('title', 'Unknown')
-            # タイトルが長い場合は短縮
-            if len(title) > 40:
-                title = title[:37] + "..."
-
-            # ステータスが変わった場合のみ更新
-            if last_status["title"] != title:
-                activity = discord.Activity(type=discord.ActivityType.listening, name=title)
-                await bot.change_presence(status=discord.Status.online, activity=activity)
-                last_status["title"] = title
-                logger.info(f"Status updated: {title}")
-        else:
-            # 再生中の曲がない場合はデフォルトメッセージ
-            if last_status["title"] is not None:
-                activity = discord.Activity(type=discord.ActivityType.watching, name="/help で コマンド一覧を表示")
-                await bot.change_presence(status=discord.Status.online, activity=activity)
-                last_status["title"] = None
-                logger.info("Status reset to default")
-
-    except Exception as e:
-        logger.error(f"Error updating status from music: {e}")
+# Status is set to idle in on_ready() and kept as idle (no automatic updates)
 
 @bot.event
 async def on_command_error(ctx: commands.Context, error: commands.CommandError):
