@@ -311,8 +311,8 @@ class Music(commands.Cog):
             queue = self.get_queue(interaction.guild.id)
             first_song = songs_to_add[0]
 
-            # 再生中でない場合は即座に再生
-            if not voice_client.is_playing():
+            # キューに曲が入っていない場合のみ即座に再生
+            if queue.current is None and not voice_client.is_playing():
                 player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.bot.loop, stream=True)
                 voice_client.play(player, after=lambda e: self.play_next(interaction.guild))
                 queue.current = first_song
@@ -347,7 +347,8 @@ class Music(commands.Cog):
                     description=f"[{first_song['title']}]({first_song['webpage_url']})",
                     color=discord.Color.green()
                 )
-                embed.add_field(name="キューの位置", value=f"#{len(queue.queue) - len(songs_to_add) + 1} ～ #{len(queue.queue)}", inline=False)
+                queue_position = len(queue.queue) - len(songs_to_add) + 1
+                embed.add_field(name="キューの位置", value=f"#{queue_position} ～ #{len(queue.queue)}", inline=False)
                 embed.add_field(name="追加曲数", value=f"{len(songs_to_add)} 曲", inline=False)
                 await interaction.followup.send(embed=embed)
 
