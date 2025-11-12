@@ -14,9 +14,8 @@ logger = setup_logger(__name__)
 
 class PermissionLevel(Enum):
     """Permission levels for bot commands"""
-    OWNER = 4
-    ADMIN = 3
-    MODERATOR = 2
+    OWNER = 3
+    ADMIN = 2
     USER = 1
 
 
@@ -265,10 +264,6 @@ class PermissionManager:
         if member.guild_permissions.administrator:
             return PermissionLevel.ADMIN
 
-        # Check moderator permission (manage_messages)
-        if member.guild_permissions.manage_messages:
-            return PermissionLevel.MODERATOR
-
         return PermissionLevel.USER
 
     def check_permission(self, guild: discord.Guild, command_name: str,
@@ -469,7 +464,6 @@ class Permissions(commands.Cog):
         colors = {
             'OWNER': discord.Color.purple(),
             'ADMIN': discord.Color.red(),
-            'MODERATOR': discord.Color.orange(),
             'USER': discord.Color.green()
         }
         return colors.get(level, discord.Color.blue())
@@ -535,7 +529,6 @@ class Permissions(commands.Cog):
             grouped: Dict[str, List[str]] = {
                 'OWNER': [],
                 'ADMIN': [],
-                'MODERATOR': [],
                 'USER': []
             }
 
@@ -551,7 +544,7 @@ class Permissions(commands.Cog):
                     grouped[default_level.name].append(f"✅ `{cmd}` (default)")
 
             # Add fields for each permission level
-            for level in ['OWNER', 'ADMIN', 'MODERATOR', 'USER']:
+            for level in ['OWNER', 'ADMIN', 'USER']:
                 if grouped[level]:
                     commands_text = '\n'.join(grouped[level][:10])
                     if len(grouped[level]) > 10:
@@ -586,7 +579,6 @@ class Permissions(commands.Cog):
     @app_commands.choices(level=[
         app_commands.Choice(name="OWNER - Bot owner only", value="OWNER"),
         app_commands.Choice(name="ADMIN - Server administrators", value="ADMIN"),
-        app_commands.Choice(name="MODERATOR - Users with manage messages", value="MODERATOR"),
         app_commands.Choice(name="USER - Everyone", value="USER")
     ])
     async def permissions_set(
@@ -715,7 +707,6 @@ class Permissions(commands.Cog):
         descriptions = {
             PermissionLevel.OWNER: "Only the bot owner can use this command",
             PermissionLevel.ADMIN: "Only server administrators can use this command",
-            PermissionLevel.MODERATOR: "Users with manage messages permission can use this command",
             PermissionLevel.USER: "Everyone can use this command"
         }
         return descriptions.get(level, "Unknown permission level")
