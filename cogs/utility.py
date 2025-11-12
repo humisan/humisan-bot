@@ -117,19 +117,6 @@ class Utility(commands.Cog):
                 timestamp=discord.utils.utcnow()
             )
 
-            # モデレーション機能
-            moderation_commands = [
-                "`/kick` - ユーザーをキック",
-                "`/ban` - ユーザーをバン",
-                "`/unban` - バンを解除",
-                "`/timeout` - タイムアウト",
-                "`/untimeout` - タイムアウト解除",
-                "`/warn` - 警告",
-                "`/clear` - メッセージ削除",
-                "`/userinfo` - ユーザー情報"
-            ]
-            embed.add_field(name="🛡️ モデレーション", value="\n".join(moderation_commands), inline=False)
-
             # 音楽機能
             music_commands = [
                 "`/play <URL>` - YouTube URL から曲を再生",
@@ -158,18 +145,6 @@ class Utility(commands.Cog):
             ]
             embed.add_field(name="📋 プレイリスト", value="\n".join(playlist_commands), inline=False)
 
-            # エンターテイメント機能
-            entertainment_commands = [
-                "`/8ball` - 8ボール占い",
-                "`/rps` - じゃんけん",
-                "`/dice` - サイコロ",
-                "`/flip` - コイン投げ",
-                "`/joke` - ジョーク",
-                "`/choose` - 選択",
-                "`/ping` - ピング表示"
-            ]
-            embed.add_field(name="🎮 エンターテイメント", value="\n".join(entertainment_commands), inline=False)
-
             # ユーティリティ機能
             utility_commands = [
                 "`/serverinfo` - サーバー情報",
@@ -181,12 +156,6 @@ class Utility(commands.Cog):
                 "`/suggest <内容>` - 機能提案"
             ]
             embed.add_field(name="🔧 ユーティリティ", value="\n".join(utility_commands), inline=False)
-
-            # その他
-            other_commands = [
-                "`/mchistory <プレイヤー名>` - Minecraftプレイヤー名履歴"
-            ]
-            embed.add_field(name="📦 その他", value="\n".join(other_commands), inline=False)
 
             embed.set_footer(text="各コマンドの詳細は、コマンド入力時に表示されます")
 
