@@ -269,6 +269,13 @@ class Music(commands.Cog):
             songs_to_add = []
             is_playlist_limited = False
 
+            # 曲数を取得してログに出力
+            if 'entries' in data:
+                total_songs = len(data.get('entries', []))
+                logger.info(f"Playlist detected: Total songs available: {total_songs}")
+            else:
+                logger.info(f"Single song detected: {data.get('title', 'Unknown')}")
+
             if 'entries' in data:
                 # プレイリストの場合（最大25曲まで）
                 max_songs = 25
