@@ -363,7 +363,7 @@ class Music(commands.Cog):
         await interaction.response.defer()
 
         try:
-            songs = await self.search_songs(query, limit=5)
+            songs = await self.search_songs(query, limit=20)
 
             if not songs:
                 await interaction.followup.send(
@@ -373,10 +373,11 @@ class Music(commands.Cog):
 
             embed = discord.Embed(
                 title="🔍 検索結果",
-                description=f"「{query}」の検索結果（最大5件）",
+                description=f"「{query}」の検索結果（全 {len(songs)} 件）",
                 color=discord.Color.blue()
             )
 
+            # 最初のページの5曲を表示
             description = ""
             for i, song in enumerate(songs[:5], 1):
                 title = song.get('title', 'Unknown')
@@ -384,11 +385,14 @@ class Music(commands.Cog):
                 description += f"{i}. {title} ({duration})\n"
 
             embed.description += "\n" + description
-            embed.set_footer(text="下のボタンをクリックして再生する曲を選択してください")
+            if len(songs) > 5:
+                embed.set_footer(text="下のボタンをクリックして再生する曲を選択するか、「次へ」で更に検索結果を見てください")
+            else:
+                embed.set_footer(text="下のボタンをクリックして再生する曲を選択してください")
 
             # ボタンビューを作成
-            view = SearchView(self, songs[:5], interaction.user)
-            await interaction.followup.send(embed=embed, view=view)
+            view = SearchView(self, songs, interaction.user, query)
+            await interaction.followup.send(embed=view.get_embed(), view=view)
 
         except Exception as e:
             logger.error(f"Search error: {str(e)}")
@@ -979,21 +983,100 @@ class MusicControlView(discord.ui.View):
 
 
 class SearchView(discord.ui.View):
-    """検索結果用のボタンビュー"""
+    """検索結果用のボタンビュー（ページネーション対応）"""
 
-    def __init__(self, music_cog, songs, requester):
-        super().__init__(timeout=30)
+    def __init__(self, music_cog, songs, requester, query: str = ""):
+        super().__init__(timeout=60)
         self.music_cog = music_cog
-        self.songs = songs
+        self.all_songs = songs
         self.requester = requester
+        self.query = query
+        self.page = 0
+        self.songs_per_page = 5
+        self.update_buttons()
 
-        for i in range(min(len(songs), 5)):
+    def get_embed(self) -> discord.Embed:
+        """現在のページの embed を生成"""
+        embed = discord.Embed(
+            title="🔍 検索結果",
+            description=f"「{self.query}」の検索結果（全 {len(self.all_songs)} 件）",
+            color=discord.Color.blue()
+        )
+
+        start_idx = self.page * self.songs_per_page
+        end_idx = start_idx + self.songs_per_page
+        current_songs = self.all_songs[start_idx:end_idx]
+
+        description = f"**ページ {self.page + 1}/{(len(self.all_songs) + self.songs_per_page - 1) // self.songs_per_page}**\n\n"
+        for i, song in enumerate(current_songs):
+            title = song.get('title', 'Unknown')
+            duration = self.music_cog.format_duration(song.get('duration', 0))
+            description += f"{start_idx + i + 1}. {title} ({duration})\n"
+
+        embed.description += "\n" + description
+        if len(self.all_songs) > self.songs_per_page:
+            embed.set_footer(text="下のボタンをクリックして再生する曲を選択するか、「次へ」で更に検索結果を見てください")
+        else:
+            embed.set_footer(text="下のボタンをクリックして再生する曲を選択してください")
+
+        return embed
+
+    def update_buttons(self):
+        """現在のページに応じてボタンを更新"""
+        self.clear_items()
+
+        # 現在のページの曲リストを取得
+        start_idx = self.page * self.songs_per_page
+        end_idx = start_idx + self.songs_per_page
+        current_songs = self.all_songs[start_idx:end_idx]
+
+        # 曲選択ボタン
+        for i, song in enumerate(current_songs):
             button = discord.ui.Button(
-                label=f"{i+1}",
+                label=f"{self.page * self.songs_per_page + i + 1}",
                 style=discord.ButtonStyle.primary
             )
-            button.callback = self.create_callback(i)
+            button.callback = self.create_callback(start_idx + i)
             self.add_item(button)
+
+        # ナビゲーションボタン
+        if self.page > 0:
+            prev_button = discord.ui.Button(label="← 前へ", style=discord.ButtonStyle.secondary)
+            prev_button.callback = self.prev_page
+            self.add_item(prev_button)
+
+        if end_idx < len(self.all_songs):
+            next_button = discord.ui.Button(label="次へ →", style=discord.ButtonStyle.secondary)
+            next_button.callback = self.next_page
+            self.add_item(next_button)
+
+    async def prev_page(self, interaction: discord.Interaction):
+        """前のページへ"""
+        if interaction.user != self.requester:
+            await interaction.response.send_message(
+                embed=create_error_embed("このボタンは使用できません"),
+                ephemeral=True
+            )
+            return
+
+        if self.page > 0:
+            self.page -= 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def next_page(self, interaction: discord.Interaction):
+        """次のページへ"""
+        if interaction.user != self.requester:
+            await interaction.response.send_message(
+                embed=create_error_embed("このボタンは使用できません"),
+                ephemeral=True
+            )
+            return
+
+        if (self.page + 1) * self.songs_per_page < len(self.all_songs):
+            self.page += 1
+            self.update_buttons()
+            await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
     def create_callback(self, index):
         async def callback(interaction: discord.Interaction):
@@ -1004,8 +1087,11 @@ class SearchView(discord.ui.View):
                 )
                 return
 
-            song = self.songs[index]
+            song = self.all_songs[index]
             query = song['webpage_url']
+
+            # interaction を defer して play コマンドを実行
+            await interaction.response.defer()
 
             # play コマンドを実行
             await self.music_cog.play(interaction, query)
