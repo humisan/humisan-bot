@@ -267,10 +267,19 @@ class Music(commands.Cog):
 
             # プレイリストまたは単一の曲を処理
             songs_to_add = []
+            is_playlist_limited = False
 
             if 'entries' in data:
-                # プレイリストの場合
-                for entry in data['entries']:
+                # プレイリストの場合（最大25曲まで）
+                max_songs = 25
+                total_entries = len(data.get('entries', []))
+
+                for i, entry in enumerate(data['entries']):
+                    # 25曲に達したら終了
+                    if len(songs_to_add) >= max_songs:
+                        is_playlist_limited = True
+                        break
+
                     if entry:
                         # extract_flat を使用している場合、webpage_url が None になる可能性があるので、id から URL を構築
                         webpage_url = entry.get('webpage_url')
@@ -293,6 +302,10 @@ class Music(commands.Cog):
                         embed=create_error_embed("プレイリストが空です")
                     )
                     return
+
+                # プレイリストが25曲以上の場合は警告を表示
+                if total_entries > max_songs:
+                    logger.info(f"Playlist has {total_entries} songs, limited to {max_songs} songs")
             else:
                 # 単一の曲の場合
                 webpage_url = data.get('webpage_url')
@@ -341,6 +354,9 @@ class Music(commands.Cog):
                 if len(songs_to_add) > 1:
                     embed.add_field(name="キューに追加", value=f"{len(songs_to_add) - 1} 曲", inline=False)
 
+                if is_playlist_limited:
+                    embed.add_field(name="⚠️ 注意", value="プレイリストが25曲以上あるため、最初の25曲のみキューに追加しました", inline=False)
+
                 await interaction.followup.send(embed=embed, view=MusicControlView(self, interaction.guild.id))
             else:
                 # キューに追加
@@ -355,6 +371,10 @@ class Music(commands.Cog):
                 queue_position = len(queue.queue) - len(songs_to_add) + 1
                 embed.add_field(name="キューの位置", value=f"#{queue_position} ～ #{len(queue.queue)}", inline=False)
                 embed.add_field(name="追加曲数", value=f"{len(songs_to_add)} 曲", inline=False)
+
+                if is_playlist_limited:
+                    embed.add_field(name="⚠️ 注意", value="プレイリストが25曲以上あるため、最初の25曲のみキューに追加しました", inline=False)
+
                 await interaction.followup.send(embed=embed)
 
         except Exception as e:
