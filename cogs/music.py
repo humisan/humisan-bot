@@ -239,7 +239,12 @@ class Music(commands.Cog):
         if not voice_client:
             voice_client = await voice_channel.connect()
             # ボットをデフォン状態に設定（常にスピーカーミュート）
-            await interaction.guild.me.edit(deafen=True)
+            try:
+                await interaction.guild.me.edit(deafen=True)
+            except discord.Forbidden:
+                logger.warning("Failed to deafen bot: Missing 'Manage Members' permission")
+            except Exception as e:
+                logger.warning(f"Failed to deafen bot: {str(e)}")
 
         try:
             # 曲情報を取得（タイムアウト付き）
