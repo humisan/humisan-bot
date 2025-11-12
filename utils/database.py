@@ -963,4 +963,9 @@ class Database:
 
 
 # Global database instance
-db = Database()
+try:
+    db = Database()
+except Exception as e:
+    logger.error(f"Failed to initialize global database instance: {e}")
+    # Create a placeholder that will be initialized later
+    db = None
