@@ -7,6 +7,8 @@ import os
 from dotenv import load_dotenv
 from config import DISCORD_TOKEN, COMMAND_PREFIX
 from utils.logger import setup_logger
+from utils.database import db
+from utils.migration import run_migration
 
 # ロガーの設定
 logger = setup_logger(__name__)
@@ -121,10 +123,31 @@ async def on_ready():
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
+    # Database migration on first startup
+    try:
+        logger.info("Running database migration from JSON files...")
+        migration_report = run_migration(db)
+        if migration_report:
+            logger.info("=" * 50)
+            logger.info("Database Migration Report:")
+            logger.info("=" * 50)
+            for key, value in migration_report.items():
+                if isinstance(value, dict):
+                    logger.info(f"{key}:")
+                    for sub_key, sub_value in value.items():
+                        logger.info(f"  {sub_key}: {sub_value}")
+                else:
+                    logger.info(f"{key}: {value}")
+            logger.info("=" * 50)
+    except Exception as e:
+        logger.error(f"Failed to run migration: {e}")
+
 @bot.event
 async def on_guild_join(guild: discord.Guild):
     """ボットがギルドに参加した時のイベント"""
     logger.info(f'Joined guild: {guild.name} (ID: {guild.id})')
+    # Create server settings in database
+    db.create_server_settings(guild.id, guild.name)
 
 @bot.event
 async def on_guild_remove(guild: discord.Guild):
