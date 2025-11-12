@@ -960,3 +960,7 @@ class Database:
             return False
         finally:
             conn.close()
+
+
+# Global database instance
+db = Database()
