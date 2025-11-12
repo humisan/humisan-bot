@@ -29,7 +29,8 @@ YTDL_OPTIONS = {
     'socket_timeout': 30,  # タイムアウト時間（秒）
     'http_headers': {  # ヘッダーを追加
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
+    },
+    'extract_flat': 'in_playlist',  # プレイリストの動画IDを高速に取得
 }
 
 FFMPEG_OPTIONS = {
@@ -246,7 +247,7 @@ class Music(commands.Cog):
             try:
                 data = await asyncio.wait_for(
                     loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False)),
-                    timeout=60  # 60秒でタイムアウト
+                    timeout=120  # 120秒でタイムアウト（プレイリスト対応）
                 )
             except asyncio.TimeoutError:
                 logger.error(f"Timeout while extracting video info for URL: {url}")
