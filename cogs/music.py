@@ -145,6 +145,7 @@ class Music(commands.Cog):
         self.playlists_file = 'playlists.json'
         self.playlists = self.load_playlists()
         self.skip_votes: Dict[int, set] = {}  # guild_id -> {user_ids}
+        self.notification_channels: Dict[int, int] = {}  # guild_id -> channel_id
 
     def load_favorites(self):
         """お気に入りを読み込む"""
@@ -613,6 +614,30 @@ class Music(commands.Cog):
         voice_client.stop()
         await interaction.response.send_message(embed=create_success_embed("⏹️ 停止", "音楽を停止してキューをクリアしました"))
 
+    @app_commands.command(name='setnowplayingchannel', description='再生中の曲情報を送信するチャネルを設定します')
+    @app_commands.describe(channel='曲情報を送信するテキストチャネル')
+    async def set_now_playing_channel(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        """再生中の曲情報を送信するチャネルを設定"""
+        if not interaction.guild:
+            await interaction.response.send_message(
+                embed=create_error_embed("このコマンドはギルド内でのみ使用可能です"),
+                ephemeral=True
+            )
+            return
+
+        # チャネルへの送信権限を確認
+        if not channel.permissions_for(interaction.guild.me).send_messages:
+            await interaction.response.send_message(
+                embed=create_error_embed("選択したチャネルに送信権限がありません"),
+                ephemeral=True
+            )
+            return
+
+        self.notification_channels[interaction.guild.id] = channel.id
+        await interaction.response.send_message(
+            embed=create_success_embed("通知チャネル設定", f"{channel.mention} に曲情報を送信するように設定しました")
+        )
+
     @app_commands.command(name='queue', description='現在のキューを表示します')
     async def queue_command(self, interaction: discord.Interaction):
         """キューを表示"""
@@ -710,20 +735,41 @@ class Music(commands.Cog):
 
     def play_next(self, guild: discord.Guild):
         """次の曲を再生"""
+        asyncio.run_coroutine_threadsafe(self._play_next_async(guild), self.bot.loop)
+
+    async def _play_next_async(self, guild: discord.Guild):
+        """次の曲を再生（非同期版）"""
         queue = self.get_queue(guild.id)
         voice_client = guild.voice_client
 
         if not queue.is_empty() or queue.repeat_mode == RepeatMode.ALL:
             song = queue.next()
             if song:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+                loop = asyncio.get_event_loop()
 
                 try:
-                    player = loop.run_until_complete(
-                        YTDLSource.from_url(song['webpage_url'], loop=loop, stream=True)
-                    )
+                    player = await YTDLSource.from_url(song['webpage_url'], loop=loop, stream=True)
                     voice_client.play(player, after=lambda e: self.play_next(guild))
+
+                    # 通知チャネルに embed を送信
+                    if guild.id in self.notification_channels:
+                        channel = guild.get_channel(self.notification_channels[guild.id])
+                        if channel:
+                            embed = discord.Embed(
+                                title="🎵 再生中",
+                                description=f"[{song['title']}]({song['webpage_url']})",
+                                color=discord.Color.blue()
+                            )
+                            if song.get('thumbnail'):
+                                embed.set_thumbnail(url=song['thumbnail'])
+                            if song.get('duration'):
+                                embed.add_field(name="再生時間", value=self.format_duration(song['duration']), inline=False)
+                            embed.add_field(name="リクエスト", value=song['requester'].mention, inline=False)
+                            try:
+                                await channel.send(embed=embed, view=MusicControlView(self, guild.id))
+                            except Exception as e:
+                                logger.error(f"Failed to send notification: {str(e)}")
+
                 except Exception as e:
                     logger.error(f"Error playing next song: {str(e)}")
 
