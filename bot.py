@@ -7,7 +7,7 @@ import os
 from dotenv import load_dotenv
 from config import DISCORD_TOKEN, COMMAND_PREFIX
 from utils.logger import setup_logger
-from utils.database import db
+from utils.database import get_database
 from utils.migration import run_migration
 
 # ロガーの設定
@@ -24,6 +24,9 @@ intents.voice_states = True          # 音声状態（音楽機能用）
 
 bot = commands.Bot(command_prefix=COMMAND_PREFIX, intents=intents)
 bot.start_time = datetime.now()
+
+# データベース初期化
+db = get_database()
 
 # Minecraft API関連の定数
 MOJANG_UUID_API = "https://api.mojang.com/users/profiles/minecraft/"

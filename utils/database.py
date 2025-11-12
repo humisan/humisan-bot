@@ -962,10 +962,12 @@ class Database:
             conn.close()
 
 
-# Global database instance
-try:
-    db = Database()
-except Exception as e:
-    logger.error(f"Failed to initialize global database instance: {e}")
-    # Create a placeholder that will be initialized later
-    db = None
+# Global database instance (will be initialized by bot.py)
+db = None
+
+def get_database(db_path: str = 'data/bot.db') -> Database:
+    """Get or create the global database instance"""
+    global db
+    if db is None:
+        db = Database(db_path)
+    return db
