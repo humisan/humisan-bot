@@ -31,6 +31,7 @@ YTDL_OPTIONS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
     },
     'extract_flat': 'in_playlist',  # プレイリストの動画IDを高速に取得
+    'playlistend': 25,  # プレイリストから最初の25曲まで取得
 }
 
 FFMPEG_OPTIONS = {
@@ -267,12 +268,11 @@ class Music(commands.Cog):
 
             # プレイリストまたは単一の曲を処理
             songs_to_add = []
-            is_playlist_limited = False
 
             # 曲数を取得してログに出力
             if 'entries' in data:
                 total_songs = len(data.get('entries', []))
-                logger.info(f"Playlist detected: Total songs available: {total_songs}")
+                logger.info(f"Playlist detected: Fetched {total_songs} songs (max 25 songs per playlist)")
             else:
                 logger.info(f"Single song detected: {data.get('title', 'Unknown')}")
 
@@ -310,9 +310,8 @@ class Music(commands.Cog):
                     )
                     return
 
-                # プレイリストが25曲以上の場合は警告を表示
-                if total_entries > max_songs:
-                    logger.info(f"Playlist has {total_entries} songs, limited to {max_songs} songs")
+                # 実際に取得された曲数をログに表示
+                logger.info(f"Added {len(songs_to_add)} songs to queue from playlist")
             else:
                 # 単一の曲の場合
                 webpage_url = data.get('webpage_url')
@@ -361,9 +360,6 @@ class Music(commands.Cog):
                 if len(songs_to_add) > 1:
                     embed.add_field(name="キューに追加", value=f"{len(songs_to_add) - 1} 曲", inline=False)
 
-                if is_playlist_limited:
-                    embed.add_field(name="⚠️ 注意", value="プレイリストが25曲以上あるため、最初の25曲のみキューに追加しました", inline=False)
-
                 await interaction.followup.send(embed=embed, view=MusicControlView(self, interaction.guild.id))
             else:
                 # キューに追加
@@ -378,9 +374,6 @@ class Music(commands.Cog):
                 queue_position = len(queue.queue) - len(songs_to_add) + 1
                 embed.add_field(name="キューの位置", value=f"#{queue_position} ～ #{len(queue.queue)}", inline=False)
                 embed.add_field(name="追加曲数", value=f"{len(songs_to_add)} 曲", inline=False)
-
-                if is_playlist_limited:
-                    embed.add_field(name="⚠️ 注意", value="プレイリストが25曲以上あるため、最初の25曲のみキューに追加しました", inline=False)
 
                 await interaction.followup.send(embed=embed)
 
