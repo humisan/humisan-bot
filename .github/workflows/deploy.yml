@@ -1,0 +1,49 @@
+name: Deploy to Pterodactyl
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Pull latest code on Pterodactyl server
+        run: |
+          echo "Triggering Pterodactyl deployment..."
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PTERODACTYL_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"command":"say Server is updating from GitHub..."}' \
+            "${{ secrets.PTERODACTYL_API_URL }}/api/client/servers/${{ secrets.SERVER_UUID }}/command"
+
+      - name: Execute deployment script
+        run: |
+          # This step sends a command to the Pterodactyl server to pull the latest code
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PTERODACTYL_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            -d '{"command":"cd /home/container && git pull origin main"}' \
+            "${{ secrets.PTERODACTYL_API_URL }}/api/client/servers/${{ secrets.SERVER_UUID }}/command"
+
+      - name: Restart Discord bot
+        run: |
+          # Send restart command to Pterodactyl
+          curl -X POST \
+            -H "Authorization: Bearer ${{ secrets.PTERODACTYL_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.PTERODACTYL_API_URL }}/api/client/servers/${{ secrets.SERVER_UUID }}/power" \
+            -d '{"signal":"restart"}'
+
+      - name: Deployment notification
+        if: success()
+        run: echo "✅ Deployment to Pterodactyl completed successfully"
+
+      - name: Deployment failed
+        if: failure()
+        run: echo "❌ Deployment failed. Please check Pterodactyl API credentials."
