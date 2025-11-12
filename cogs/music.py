@@ -234,6 +234,25 @@ class Music(commands.Cog):
 
         await interaction.response.defer()
 
+        # 実際の再生処理
+        await self._perform_play(interaction, url)
+
+    async def _perform_play(self, interaction: discord.Interaction, url: str):
+        """実際の再生処理（play コマンドと SearchView から共通で使用）"""
+        # ギルドメンバーの情報を取得（非同期版）
+        try:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        except Exception as e:
+            logger.warning(f"Failed to fetch member: {e}")
+            member = None
+
+        if not member or not member.voice or not member.voice.channel:
+            await interaction.followup.send(
+                embed=create_error_embed("ボイスチャネルに接続してください"),
+                ephemeral=True
+            )
+            return
+
         voice_channel = member.voice.channel
         voice_client = interaction.guild.voice_client
 
@@ -1197,11 +1216,23 @@ class SearchView(discord.ui.View):
                 )
                 return
 
+            # Check voice channel before proceeding
+            member = await interaction.guild.fetch_member(interaction.user.id)
+            if not member or not member.voice or not member.voice.channel:
+                await interaction.response.send_message(
+                    embed=create_error_embed("ボイスチャネルに接続してください"),
+                    ephemeral=True
+                )
+                return
+
             song = self.all_songs[index]
             query = song['webpage_url']
 
-            # play コマンドを実行（play内で defer されるため、ここでは defer しない）
-            await self.music_cog.play(interaction, query)
+            # Defer the interaction
+            await interaction.response.defer()
+
+            # Call the shared play implementation
+            await self.music_cog._perform_play(interaction, query)
 
         return callback
 
