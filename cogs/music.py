@@ -1337,11 +1337,21 @@ class SearchView(discord.ui.View):
             song = self.all_songs[index]
             query = song['webpage_url']
 
-            # Defer the interaction
-            await interaction.response.defer()
+            try:
+                # Defer the interaction
+                await interaction.response.defer()
 
-            # Call the shared play implementation
-            await self.music_cog._perform_play(interaction, query)
+                # Call the shared play implementation
+                await self.music_cog._perform_play(interaction, query)
+            except Exception as e:
+                logger.error(f"Error in search callback: {str(e)}")
+                try:
+                    await interaction.followup.send(
+                        embed=create_error_embed("曲の再生に失敗しました", str(e)),
+                        ephemeral=True
+                    )
+                except:
+                    pass
 
         return callback
 
