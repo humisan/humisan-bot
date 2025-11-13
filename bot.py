@@ -4,6 +4,7 @@ import aiohttp
 import asyncio
 from datetime import datetime
 import os
+import subprocess
 from dotenv import load_dotenv
 from config import DISCORD_TOKEN, COMMAND_PREFIX
 from utils.logger import setup_logger
@@ -12,6 +13,15 @@ from utils.migration import run_migration
 
 # ロガーの設定
 logger = setup_logger(__name__)
+
+def get_git_info():
+    """Git のコミット情報を取得"""
+    try:
+        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()[:8]
+        commit_date = subprocess.check_output(['git', 'log', '-1', '--format=%ai'], text=True).strip()
+        return f"{commit_hash} ({commit_date})"
+    except:
+        return "Unknown"
 
 # 環境変数を読み込む
 load_dotenv()
@@ -98,6 +108,9 @@ async def load_cogs():
 @bot.event
 async def on_ready():
     """ボットが起動した時のイベント"""
+    logger.info("=" * 60)
+    logger.info(f"Bot Version/Commit: {get_git_info()}")
+    logger.info("=" * 60)
     logger.info(f'{bot.user} has connected to Discord!')
     logger.info(f'Bot is ready! Currently in {len(bot.guilds)} guilds.')
 
