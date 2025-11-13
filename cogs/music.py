@@ -1318,7 +1318,10 @@ class SearchView(discord.ui.View):
 
     def create_callback(self, index):
         async def callback(interaction: discord.Interaction):
+            logger.info(f"Search callback triggered: index={index}, user={interaction.user.name}")
+
             if interaction.user != self.requester:
+                logger.warning(f"Search callback: User {interaction.user.name} is not the requester")
                 await interaction.response.send_message(
                     embed=create_error_embed("このボタンは使用できません"),
                     ephemeral=True
@@ -1326,67 +1329,98 @@ class SearchView(discord.ui.View):
                 return
 
             # Check voice channel before proceeding
+            logger.info(f"Fetching member for user {interaction.user.id}")
             member = await interaction.guild.fetch_member(interaction.user.id)
             if not member or not member.voice or not member.voice.channel:
+                logger.warning(f"Search callback: User not in voice channel")
                 await interaction.response.send_message(
                     embed=create_error_embed("ボイスチャネルに接続してください"),
                     ephemeral=True
                 )
                 return
 
+            logger.info(f"User is in voice channel: {member.voice.channel.name}")
+            logger.info(f"Deferring interaction...")
             await interaction.response.defer()
+            logger.info(f"Interaction deferred successfully")
 
             try:
+                logger.info(f"Getting song at index {index}")
                 song = self.all_songs[index]
+                logger.info(f"Song selected: {song['title']}")
+
                 voice_channel = member.voice.channel
                 voice_client = interaction.guild.voice_client
+                logger.info(f"Voice client status: {voice_client}")
 
                 # ボイスチャネルに接続
                 if not voice_client:
+                    logger.info(f"Connecting to voice channel: {voice_channel.name}")
                     voice_client = await voice_channel.connect()
+                    logger.info(f"Connected to voice channel")
                     try:
                         await interaction.guild.me.edit(deafen=True)
-                    except:
-                        pass
+                        logger.info(f"Bot deafened")
+                    except Exception as e:
+                        logger.warning(f"Failed to deafen bot: {str(e)}")
 
                 # キューを取得
+                logger.info(f"Getting queue for guild {interaction.guild.id}")
                 queue = self.music_cog.get_queue(interaction.guild.id)
+                logger.info(f"Queue status: current={queue.current is not None}, is_playing={voice_client.is_playing()}")
 
                 # キューに曲が入っていない場合のみ即座に再生
                 if queue.current is None and not voice_client.is_playing():
-                    player = await YTDLSource.from_url(song['webpage_url'], loop=self.music_cog.bot.loop, stream=True)
-                    voice_client.play(player, after=lambda e: self.music_cog.play_next(interaction.guild))
-                    queue.current = song
-                    queue.start_time = time.time()
-
-                    # 再生履歴に記録
+                    logger.info(f"Starting playback of {song['title']}")
                     try:
-                        self.music_cog.db.record_music_history(
-                            guild_id=str(interaction.guild_id),
-                            user_id=str(interaction.user.id),
-                            title=song['title'],
-                            url=song['webpage_url'],
-                            genre=None,
-                            duration=song.get('duration')
+                        logger.info(f"Creating YTDLSource from: {song['webpage_url']}")
+                        player = await YTDLSource.from_url(song['webpage_url'], loop=self.music_cog.bot.loop, stream=True)
+                        logger.info(f"YTDLSource created successfully")
+
+                        logger.info(f"Playing audio")
+                        voice_client.play(player, after=lambda e: self.music_cog.play_next(interaction.guild))
+                        queue.current = song
+                        queue.start_time = time.time()
+                        logger.info(f"Playback started")
+
+                        # 再生履歴に記録
+                        try:
+                            logger.info(f"Recording music history")
+                            self.music_cog.db.record_music_history(
+                                guild_id=str(interaction.guild_id),
+                                user_id=str(interaction.user.id),
+                                title=song['title'],
+                                url=song['webpage_url'],
+                                genre=None,
+                                duration=song.get('duration')
+                            )
+                            logger.info(f"Music history recorded")
+                        except Exception as e:
+                            logger.warning(f"Failed to record music history: {str(e)}")
+
+                        logger.info(f"Creating embed message")
+                        embed = discord.Embed(
+                            title="🎵 再生中",
+                            description=f"[{song['title']}]({song['webpage_url']})",
+                            color=discord.Color.blue()
                         )
+                        if song.get('thumbnail'):
+                            embed.set_thumbnail(url=song['thumbnail'])
+                        embed.add_field(name="リクエスト", value=interaction.user.mention, inline=False)
+                        if song.get('duration'):
+                            embed.add_field(name="再生時間", value=self.music_cog.format_duration(song['duration']), inline=False)
+
+                        logger.info(f"Sending followup message")
+                        await interaction.followup.send(embed=embed, view=MusicControlView(self.music_cog, interaction.guild.id))
+                        logger.info(f"Followup message sent successfully")
                     except Exception as e:
-                        logger.warning(f"Failed to record music history: {str(e)}")
-
-                    embed = discord.Embed(
-                        title="🎵 再生中",
-                        description=f"[{song['title']}]({song['webpage_url']})",
-                        color=discord.Color.blue()
-                    )
-                    if song.get('thumbnail'):
-                        embed.set_thumbnail(url=song['thumbnail'])
-                    embed.add_field(name="リクエスト", value=interaction.user.mention, inline=False)
-                    if song.get('duration'):
-                        embed.add_field(name="再生時間", value=self.music_cog.format_duration(song['duration']), inline=False)
-
-                    await interaction.followup.send(embed=embed, view=MusicControlView(self.music_cog, interaction.guild.id))
+                        logger.error(f"Error during playback: {str(e)}", exc_info=True)
+                        raise
                 else:
+                    logger.info(f"Queue not empty, adding to queue")
                     # キューに追加
                     queue.add(song)
+                    logger.info(f"Song added to queue at position {len(queue.queue)}")
 
                     embed = discord.Embed(
                         title="➕ キューに追加",
@@ -1396,13 +1430,17 @@ class SearchView(discord.ui.View):
                     embed.add_field(name="キューの位置", value=f"#{len(queue.queue)}", inline=False)
 
                     await interaction.followup.send(embed=embed)
+                    logger.info(f"Queue addition message sent")
 
             except Exception as e:
-                logger.error(f"Error in search callback: {str(e)}")
-                await interaction.followup.send(
-                    embed=create_error_embed("曲の再生に失敗しました", str(e)),
-                    ephemeral=True
-                )
+                logger.error(f"Error in search callback: {str(e)}", exc_info=True)
+                try:
+                    await interaction.followup.send(
+                        embed=create_error_embed("曲の再生に失敗しました", str(e)),
+                        ephemeral=True
+                    )
+                except Exception as e2:
+                    logger.error(f"Error sending error message: {str(e2)}")
 
         return callback
 
