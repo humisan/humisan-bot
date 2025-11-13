@@ -152,8 +152,7 @@ class Utility(commands.Cog):
                 "`/roleinfo <ロール>` - ロール情報",
                 "`/help` - ヘルプ",
                 "`/uptime` - 稼働時間",
-                "`/botinfo` - ボット情報",
-                "`/suggest <内容>` - 機能提案"
+                "`/botinfo` - ボット情報"
             ]
             embed.add_field(name="🔧 ユーティリティ", value="\n".join(utility_commands), inline=False)
 
@@ -207,38 +206,6 @@ class Utility(commands.Cog):
         except Exception as e:
             logger.error(f"Error in botinfo command: {str(e)}")
             await interaction.response.send_message(embed=create_error_embed("ボット情報の取得に失敗しました", str(e)), ephemeral=True)
-
-    @app_commands.command(name='suggest', description='機能を提案します')
-    @app_commands.describe(suggestion='提案内容')
-    async def suggest(self, interaction: discord.Interaction, suggestion: str):
-        """機能を提案します"""
-        # DM チェック
-        if interaction.guild is None:
-            await interaction.response.send_message(
-                embed=create_error_embed("このコマンドはギルド内でのみ使用可能です"),
-                ephemeral=True
-            )
-            return
-
-        try:
-            embed = discord.Embed(
-                title="💡 提案",
-                description=suggestion,
-                color=discord.Color.blue(),
-                timestamp=discord.utils.utcnow()
-            )
-            embed.set_footer(text=f"提案者: {interaction.user.name}")
-
-            # 提案ログチャネルに送信（存在する場合）
-            suggest_channel = discord.utils.get(interaction.guild.text_channels, name="suggestions")
-            if suggest_channel:
-                await suggest_channel.send(embed=embed)
-
-            await interaction.response.send_message(embed=create_success_embed("提案ありがとうございます！", "あなたの提案は記録されました"))
-            logger.info(f"{interaction.user.name} suggested: {suggestion}")
-        except Exception as e:
-            logger.error(f"Error in suggest command: {str(e)}")
-            await interaction.response.send_message(embed=create_error_embed("提案の送信に失敗しました", str(e)), ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Utility(bot))
