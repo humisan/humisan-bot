@@ -154,6 +154,48 @@ class Database:
                 ON bot_stats(guild_id, date)
             ''')
 
+            # Music history table - Track played songs for recommendations
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS music_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    url TEXT NOT NULL,
+                    genre TEXT,
+                    duration INTEGER,
+                    played_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE
+                )
+            ''')
+
+            # User stats table - Track user statistics
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    total_plays INTEGER DEFAULT 0,
+                    total_playtime INTEGER DEFAULT 0,
+                    favorite_genre TEXT,
+                    last_played_at DATETIME,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE,
+                    UNIQUE(guild_id, user_id)
+                )
+            ''')
+
+            # Create indexes for new tables
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_music_history_user
+                ON music_history(guild_id, user_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_user_stats_guild
+                ON user_stats(guild_id, user_id)
+            ''')
+
             conn.commit()
             logger.info("All database tables initialized successfully")
 
@@ -958,6 +1000,184 @@ class Database:
         except sqlite3.Error as e:
             logger.error(f"Error vacuuming database: {e}")
             return False
+        finally:
+            conn.close()
+
+    # ==================== MUSIC HISTORY & STATS METHODS ====================
+
+    def record_music_history(
+        self,
+        guild_id: str,
+        user_id: str,
+        title: str,
+        url: str,
+        genre: Optional[str] = None,
+        duration: Optional[int] = None,
+    ) -> bool:
+        """
+        Record a song play in history
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            title: Song title
+            url: Song URL
+            genre: Song genre (optional)
+            duration: Song duration in seconds (optional)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO music_history (guild_id, user_id, title, url, genre, duration)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (guild_id, user_id, title, url, genre, duration))
+
+            # Update user stats
+            cursor.execute('''
+                INSERT INTO user_stats (guild_id, user_id, total_plays, total_playtime, favorite_genre, last_played_at, updated_at)
+                VALUES (?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                    total_plays = total_plays + 1,
+                    total_playtime = total_playtime + COALESCE(?, 0),
+                    last_played_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (guild_id, user_id, duration or 0, genre, duration or 0))
+
+            conn.commit()
+            logger.info(f"Recorded music history for {user_id} in guild {guild_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error recording music history: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def get_user_stats(self, guild_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get user's music statistics
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+
+        Returns:
+            Dictionary with user stats or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT total_plays, total_playtime, favorite_genre, last_played_at
+                FROM user_stats
+                WHERE guild_id = ? AND user_id = ?
+            ''', (guild_id, user_id))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'total_plays': row[0],
+                    'total_playtime': row[1],
+                    'favorite_genre': row[2],
+                    'last_played_at': row[3]
+                }
+            return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting user stats: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_top_songs(self, guild_id: str, limit: int = 10, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get top played songs
+
+        Args:
+            guild_id: Discord guild ID
+            limit: Number of songs to return
+            user_id: Optional - get top songs for specific user
+
+        Returns:
+            List of top songs
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            if user_id:
+                cursor.execute('''
+                    SELECT title, url, COUNT(*) as play_count, genre
+                    FROM music_history
+                    WHERE guild_id = ? AND user_id = ?
+                    GROUP BY url
+                    ORDER BY play_count DESC
+                    LIMIT ?
+                ''', (guild_id, user_id, limit))
+            else:
+                cursor.execute('''
+                    SELECT title, url, COUNT(*) as play_count, genre
+                    FROM music_history
+                    WHERE guild_id = ?
+                    GROUP BY url
+                    ORDER BY play_count DESC
+                    LIMIT ?
+                ''', (guild_id, limit))
+
+            rows = cursor.fetchall()
+            return [
+                {
+                    'title': row[0],
+                    'url': row[1],
+                    'play_count': row[2],
+                    'genre': row[3]
+                }
+                for row in rows
+            ]
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting top songs: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def get_genre_history(self, guild_id: str, user_id: str, limit: int = 50) -> List[str]:
+        """
+        Get user's song genres from history
+
+        Args:
+            guild_id: Discord guild ID
+            user_id: Discord user ID
+            limit: Number of recent songs to analyze
+
+        Returns:
+            List of genres
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT DISTINCT genre
+                FROM music_history
+                WHERE guild_id = ? AND user_id = ? AND genre IS NOT NULL
+                ORDER BY played_at DESC
+                LIMIT ?
+            ''', (guild_id, user_id, limit))
+
+            rows = cursor.fetchall()
+            return [row[0] for row in rows if row[0]]
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting genre history: {e}")
+            return []
         finally:
             conn.close()
 
