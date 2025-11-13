@@ -3,6 +3,7 @@ from discord.ext import commands
 from discord import app_commands
 from utils.helpers import create_error_embed, create_success_embed
 from utils.logger import setup_logger
+from utils.database import get_database
 import yt_dlp
 import asyncio
 from typing import Dict, List
@@ -141,6 +142,7 @@ class Music(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.db = get_database()
         self.queues: Dict[int, MusicQueue] = {}
         self.favorites_file = 'favorites.json'
         self.favorites = self.load_favorites()
@@ -360,6 +362,19 @@ class Music(commands.Cog):
                 voice_client.play(player, after=lambda e: self.play_next(interaction.guild))
                 queue.current = first_song
                 queue.start_time = time.time()
+
+                # 再生履歴に記録
+                try:
+                    self.db.record_music_history(
+                        guild_id=str(interaction.guild_id),
+                        user_id=str(interaction.user.id),
+                        title=first_song['title'],
+                        url=first_song['webpage_url'],
+                        genre=None,  # ジャンル情報はYouTubeから自動取得不可のため None
+                        duration=first_song.get('duration')
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record music history: {str(e)}")
 
                 # 残りの曲をキューに追加
                 for song in songs_to_add[1:]:
@@ -747,6 +762,22 @@ class Music(commands.Cog):
                 try:
                     player = await YTDLSource.from_url(song['webpage_url'], loop=loop, stream=True)
                     voice_client.play(player, after=lambda e: self.play_next(guild))
+
+                    # 再生履歴に記録（次の曲が再生される時）
+                    try:
+                        # 現在の曲をリクエストしたユーザーを取得
+                        requester = song.get('requester')
+                        if requester:
+                            self.db.record_music_history(
+                                guild_id=str(guild.id),
+                                user_id=str(requester.id),
+                                title=song['title'],
+                                url=song['webpage_url'],
+                                genre=None,  # ジャンル情報はYouTubeから自動取得不可のため None
+                                duration=song.get('duration')
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to record music history: {str(e)}")
 
                     # 通知チャネルに embed を送信
                     if queue.notification_channel_id:
