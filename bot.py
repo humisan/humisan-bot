@@ -17,10 +17,19 @@ logger = setup_logger(__name__)
 def get_git_info():
     """Git のコミット情報を取得"""
     try:
-        commit_hash = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()[:8]
-        commit_date = subprocess.check_output(['git', 'log', '-1', '--format=%ai'], text=True).strip()
+        commit_hash = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        ).strip()[:8]
+        commit_date = subprocess.check_output(
+            ['git', 'log', '-1', '--format=%ai'],
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__))
+        ).strip()
         return f"{commit_hash} ({commit_date})"
-    except:
+    except Exception as e:
+        logger.warning(f"Failed to get git info: {str(e)}")
         return "Unknown"
 
 # 環境変数を読み込む
