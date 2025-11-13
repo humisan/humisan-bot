@@ -199,7 +199,14 @@ class Music(commands.Cog):
                 None,
                 lambda: yt_dlp.YoutubeDL(ydl_opts).extract_info(f"ytsearch{limit}:{query}", download=False)
             )
-            return data.get('entries', [])
+            entries = data.get('entries', [])
+
+            # webpage_url を追加
+            for entry in entries:
+                if 'webpage_url' not in entry and entry.get('id'):
+                    entry['webpage_url'] = f"https://www.youtube.com/watch?v={entry.get('id')}"
+
+            return entries
         except Exception as e:
             logger.error(f"Search error: {str(e)}")
             return []
