@@ -1334,24 +1334,75 @@ class SearchView(discord.ui.View):
                 )
                 return
 
-            song = self.all_songs[index]
-            query = song['webpage_url']
+            await interaction.response.defer()
 
             try:
-                # Defer the interaction
-                await interaction.response.defer()
+                song = self.all_songs[index]
+                voice_channel = member.voice.channel
+                voice_client = interaction.guild.voice_client
 
-                # Call the shared play implementation
-                await self.music_cog._perform_play(interaction, query)
+                # ボイスチャネルに接続
+                if not voice_client:
+                    voice_client = await voice_channel.connect()
+                    try:
+                        await interaction.guild.me.edit(deafen=True)
+                    except:
+                        pass
+
+                # キューを取得
+                queue = self.music_cog.get_queue(interaction.guild.id)
+
+                # キューに曲が入っていない場合のみ即座に再生
+                if queue.current is None and not voice_client.is_playing():
+                    player = await YTDLSource.from_url(song['webpage_url'], loop=self.music_cog.bot.loop, stream=True)
+                    voice_client.play(player, after=lambda e: self.music_cog.play_next(interaction.guild))
+                    queue.current = song
+                    queue.start_time = time.time()
+
+                    # 再生履歴に記録
+                    try:
+                        self.music_cog.db.record_music_history(
+                            guild_id=str(interaction.guild_id),
+                            user_id=str(interaction.user.id),
+                            title=song['title'],
+                            url=song['webpage_url'],
+                            genre=None,
+                            duration=song.get('duration')
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record music history: {str(e)}")
+
+                    embed = discord.Embed(
+                        title="🎵 再生中",
+                        description=f"[{song['title']}]({song['webpage_url']})",
+                        color=discord.Color.blue()
+                    )
+                    if song.get('thumbnail'):
+                        embed.set_thumbnail(url=song['thumbnail'])
+                    embed.add_field(name="リクエスト", value=interaction.user.mention, inline=False)
+                    if song.get('duration'):
+                        embed.add_field(name="再生時間", value=self.music_cog.format_duration(song['duration']), inline=False)
+
+                    await interaction.followup.send(embed=embed, view=MusicControlView(self.music_cog, interaction.guild.id))
+                else:
+                    # キューに追加
+                    queue.add(song)
+
+                    embed = discord.Embed(
+                        title="➕ キューに追加",
+                        description=f"[{song['title']}]({song['webpage_url']})",
+                        color=discord.Color.green()
+                    )
+                    embed.add_field(name="キューの位置", value=f"#{len(queue.queue)}", inline=False)
+
+                    await interaction.followup.send(embed=embed)
+
             except Exception as e:
                 logger.error(f"Error in search callback: {str(e)}")
-                try:
-                    await interaction.followup.send(
-                        embed=create_error_embed("曲の再生に失敗しました", str(e)),
-                        ephemeral=True
-                    )
-                except:
-                    pass
+                await interaction.followup.send(
+                    embed=create_error_embed("曲の再生に失敗しました", str(e)),
+                    ephemeral=True
+                )
 
         return callback
 
