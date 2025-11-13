@@ -164,8 +164,7 @@ class Database:
                     url TEXT NOT NULL,
                     genre TEXT,
                     duration INTEGER,
-                    played_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE
+                    played_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 
@@ -180,7 +179,6 @@ class Database:
                     favorite_genre TEXT,
                     last_played_at DATETIME,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE,
                     UNIQUE(guild_id, user_id)
                 )
             ''')
