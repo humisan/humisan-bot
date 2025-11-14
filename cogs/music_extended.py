@@ -291,8 +291,8 @@ class MusicExtended(commands.Cog):
                 )
                 return
 
-            # トップ曲から類似曲を検索
-            similar_songs = await self._search_similar_songs(top_songs, music_cog, limit=5)
+            # ジャンルベースで異なるアーティストの推奨曲を検索
+            similar_songs = await self._search_recommend_songs(top_songs, music_cog, limit=5)
 
             if not similar_songs:
                 await interaction.followup.send(
@@ -615,6 +615,99 @@ class MusicExtended(commands.Cog):
 
         except Exception as e:
             logger.error(f"Error in autoplay loop: {e}")
+
+    async def _search_recommend_songs(self, top_songs: List[Dict], music_cog, limit: int = 5) -> List[Dict]:
+        """
+        ジャンル・ムード・タイプベースで異なるアーティストの推奨曲を検索
+
+        Args:
+            top_songs: top_songs list from get_top_songs
+            music_cog: Music Cog instance with search_songs method
+            limit: Number of songs to return
+
+        Returns:
+            List of recommended songs from YouTube with diverse artists
+        """
+        try:
+            similar_songs = []
+            searched_urls = set()
+            searched_artists = set()
+
+            # ジャンル、ムード、タイプなどの検索クエリを定義
+            search_keywords = [
+                "relaxing music",
+                "chill vibes",
+                "indie folk",
+                "acoustic covers",
+                "music playlist",
+                "trending songs",
+                "discover new music",
+                "pop covers",
+                "lo-fi beats",
+                "ambient music",
+                "upbeat songs",
+                "feel good music",
+                "study music",
+                "workout music",
+                "road trip playlist"
+            ]
+
+            import random
+            random.shuffle(search_keywords)
+
+            for keyword in search_keywords:
+                if len(similar_songs) >= limit:
+                    break
+
+                try:
+                    logger.debug(f"Recommend: Searching with keyword: '{keyword}'")
+
+                    search_results = await music_cog.search_songs(keyword, limit=5)
+
+                    for result in search_results:
+                        if len(similar_songs) >= limit:
+                            break
+
+                        url = result.get('webpage_url') or result.get('url')
+                        title = result.get('title', '')
+
+                        # アーティスト名を抽出
+                        artist = None
+                        if ' - ' in title:
+                            artist = title.split(' - ')[0].strip()
+
+                        # チェック：
+                        # 1. URLが既に使用されていない
+                        # 2. トップ曲と同じURLでない
+                        # 3. 同じアーティストの曲をフィルタリング（最大1曲まで）
+                        if not url or url in searched_urls:
+                            continue
+
+                        # トップ曲のURLと比較
+                        is_top_song = any(url == top_song.get('url') for top_song in top_songs)
+                        if is_top_song:
+                            continue
+
+                        # 同じアーティストの曲は1曲だけに制限
+                        if artist:
+                            if artist in searched_artists:
+                                continue
+                            searched_artists.add(artist)
+
+                        similar_songs.append(result)
+                        searched_urls.add(url)
+                        logger.debug(f"Recommend: Found song: '{title}'")
+
+                except Exception as e:
+                    logger.warning(f"Recommend: Error searching with keyword '{keyword}': {str(e)}")
+                    continue
+
+            logger.info(f"Recommend: Found {len(similar_songs)} recommended songs")
+            return similar_songs[:limit]
+
+        except Exception as e:
+            logger.error(f"Error in _search_recommend_songs: {str(e)}")
+            return []
 
     async def _search_similar_songs(self, top_songs: List[Dict], music_cog, limit: int = 5) -> List[Dict]:
         """
