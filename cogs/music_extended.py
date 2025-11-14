@@ -552,10 +552,33 @@ class MusicExtended(commands.Cog):
                                     queue.start_time = time.time()
 
                                     try:
-                                        from cogs.music import YTDLSource
+                                        from cogs.music import YTDLSource, MusicControlView
                                         player = await YTDLSource.from_url(next_song['webpage_url'], loop=self.bot.loop, stream=True)
                                         voice_client.play(player, after=lambda e: music_cog.play_next(guild))
                                         logger.info(f"Autoplay: Started playing '{next_song['title']}'")
+
+                                        # 曲の embed を送信
+                                        if queue.notification_channel_id:
+                                            channel = guild.get_channel(queue.notification_channel_id)
+                                            if channel:
+                                                embed = discord.Embed(
+                                                    title="🎵 自動再生中",
+                                                    description=f"[{next_song['title']}]({next_song['webpage_url']})",
+                                                    color=discord.Color.blue()
+                                                )
+                                                if next_song.get('thumbnail'):
+                                                    embed.set_thumbnail(url=next_song['thumbnail'])
+                                                if next_song.get('duration'):
+                                                    embed.add_field(
+                                                        name="再生時間",
+                                                        value=music_cog.format_duration(next_song['duration']),
+                                                        inline=False
+                                                    )
+                                                embed.add_field(name="リクエスト", value="🤖 自動再生", inline=False)
+                                                try:
+                                                    await channel.send(embed=embed, view=MusicControlView(music_cog, guild.id))
+                                                except Exception as e:
+                                                    logger.error(f"Failed to send autoplay notification: {str(e)}")
                                     except Exception as e:
                                         logger.error(f"Autoplay: Error playing song: {str(e)}")
                             else:
