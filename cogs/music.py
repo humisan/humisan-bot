@@ -942,7 +942,11 @@ class Music(commands.Cog):
                 except Exception as e:
                     logger.error(f"Error playing next song: {str(e)}")
         else:
-            # キューが空の場合、後から曲が追加されたときの対応
+            # キューが空かつリピートモードが ALL でない場合
+            # current をクリアして、新しい曲が追加される時に即座に再生できるようにする
+            queue.current = None
+            logger.debug(f"Queue emptied, cleared current for guild {guild.id}")
+
             # キューに曲が残っていて再生されていない場合は、再度 play_next を呼ぶ
             if not queue.is_empty() and not voice_client.is_playing():
                 logger.info(f"Queue has songs but nothing is playing, scheduling next play for guild {guild.id}")
