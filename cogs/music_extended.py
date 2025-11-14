@@ -457,20 +457,110 @@ class MusicExtended(commands.Cog):
 
     # ==================== バックグラウンドタスク ====================
 
-    @tasks.loop(minutes=5)
+    @tasks.loop(minutes=1)
     async def autoplay_loop(self):
         """24/7自動再生のバックグラウンドループ"""
         try:
+            # Music Cog を取得
+            music_cog = self.bot.get_cog('Music')
+            if not music_cog:
+                logger.warning("Music Cog not found for autoplay")
+                return
+
             for guild_id, session in list(autoplay_sessions.items()):
                 if not session.get('enabled'):
                     continue
 
-                # TODO: キューが空の場合、自動的に曲を追加
-                # これは music.py との連携が必要
-                logger.debug(f"Autoplay loop running for guild {guild_id}")
+                try:
+                    guild = self.bot.get_guild(guild_id)
+                    if not guild:
+                        logger.debug(f"Guild {guild_id} not found")
+                        continue
+
+                    # voice_client を取得
+                    voice_client = guild.voice_client
+                    if not voice_client or not voice_client.is_connected():
+                        logger.debug(f"Bot not connected to voice in guild {guild_id}")
+                        continue
+
+                    # キューを取得
+                    queue = music_cog.get_queue(guild_id)
+
+                    # キューが空かつ何も再生されていない場合、曲を追加
+                    if queue.is_empty() and not voice_client.is_playing():
+                        logger.info(f"Autoplay: Queue is empty in guild {guild_id}, fetching songs...")
+
+                        # music_history から最近の曲を取得（ランダムサンプリング）
+                        recent_songs = self._get_random_songs_from_history(guild_id, limit=5)
+
+                        if recent_songs:
+                            for song in recent_songs:
+                                # song オブジェクトを作成
+                                song_obj = {
+                                    'title': song['title'],
+                                    'url': song['url'],
+                                    'webpage_url': song['url'],
+                                    'duration': song.get('duration'),
+                                    'requester': guild.me,  # ボット自身をリクエスター扱い
+                                    'thumbnail': None
+                                }
+                                queue.add(song_obj)
+                                logger.info(f"Autoplay: Added '{song['title']}' to queue")
+
+                            # 最初の曲を再生
+                            if queue.current is None and queue.queue:
+                                next_song = queue.queue.pop(0)
+                                queue.current = next_song
+                                queue.start_time = time.time()
+
+                                try:
+                                    from cogs.music import YTDLSource
+                                    player = await YTDLSource.from_url(next_song['webpage_url'], loop=self.bot.loop, stream=True)
+                                    voice_client.play(player, after=lambda e: music_cog.play_next(guild))
+                                    logger.info(f"Autoplay: Started playing '{next_song['title']}'")
+                                except Exception as e:
+                                    logger.error(f"Autoplay: Error playing song: {str(e)}")
+                        else:
+                            logger.debug(f"Autoplay: No songs found in history for guild {guild_id}")
+
+                except Exception as e:
+                    logger.error(f"Autoplay error for guild {guild_id}: {str(e)}")
 
         except Exception as e:
             logger.error(f"Error in autoplay loop: {e}")
+
+    def _get_random_songs_from_history(self, guild_id: str, limit: int = 5) -> List[Dict]:
+        """再生履歴からランダムに曲を取得"""
+        try:
+            import random
+            cursor = self.db.conn.cursor()
+            cursor.execute('''
+                SELECT DISTINCT title, url, duration FROM music_history
+                WHERE guild_id = ?
+                ORDER BY RANDOM()
+                LIMIT ?
+            ''', (guild_id, limit * 2))  # 多めに取得して重複を避ける
+
+            rows = cursor.fetchall()
+            songs = []
+            seen_urls = set()
+
+            for row in rows:
+                url = row[1]
+                if url not in seen_urls:
+                    songs.append({
+                        'title': row[0],
+                        'url': url,
+                        'duration': row[2]
+                    })
+                    seen_urls.add(url)
+                    if len(songs) >= limit:
+                        break
+
+            return songs
+        except Exception as e:
+            logger.error(f"Error getting songs from history: {str(e)}")
+            return []
 
     @autoplay_loop.before_loop
     async def before_autoplay_loop(self):
