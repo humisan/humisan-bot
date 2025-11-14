@@ -654,9 +654,9 @@ class Music(commands.Cog):
         voice_client.resume()
         await interaction.response.send_message(embed=create_success_embed("▶️ 再開", "音楽を再開しました"))
 
-    @app_commands.command(name='skip', description='現在の曲をスキップします')
+    @app_commands.command(name='skip', description='現在の曲をスキップします（投票制）')
     async def skip(self, interaction: discord.Interaction):
-        """曲をスキップ"""
+        """曲をスキップ（投票制）"""
         voice_client = interaction.guild.voice_client
 
         if not voice_client or not voice_client.is_playing():
@@ -666,8 +666,56 @@ class Music(commands.Cog):
             )
             return
 
-        voice_client.stop()
-        await interaction.response.send_message(embed=create_success_embed("⏭️ スキップ", "曲をスキップしました"))
+        guild_id = interaction.guild.id
+
+        # ボイスチャネルのメンバー数を取得（ボット自身は除外）
+        voice_channel = voice_client.channel
+        human_members = [m for m in voice_channel.members if not m.bot]
+        num_members = len(human_members)
+
+        # 必要投票数を計算（メンバー数の過半数）
+        required_votes = (num_members // 2) + 1
+
+        # スキップ投票を初期化
+        if guild_id not in self.skip_votes:
+            self.skip_votes[guild_id] = set()
+
+        # ユーザーが既に投票していないかチェック
+        if interaction.user.id in self.skip_votes[guild_id]:
+            await interaction.response.send_message(
+                embed=create_error_embed("既に投票済みです", f"現在の投票: {len(self.skip_votes[guild_id])}/{required_votes}"),
+                ephemeral=True
+            )
+            return
+
+        # 投票を追加
+        self.skip_votes[guild_id].add(interaction.user.id)
+        current_votes = len(self.skip_votes[guild_id])
+
+        # 投票数が必要数に達したかチェック
+        if current_votes >= required_votes:
+            # スキップ実行
+            self.skip_votes[guild_id].clear()
+            voice_client.stop()
+            embed = discord.Embed(
+                title="⏭️ スキップ",
+                description="投票によって曲がスキップされました",
+                color=discord.Color.green()
+            )
+            embed.add_field(name="投票数", value=f"{current_votes}/{required_votes}", inline=True)
+            await interaction.response.send_message(embed=embed)
+        else:
+            # 投票待機中
+            remaining_votes = required_votes - current_votes
+            embed = discord.Embed(
+                title="🗳️ スキップ投票",
+                description=f"投票が記録されました",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="現在の投票", value=f"{current_votes}/{required_votes}", inline=False)
+            embed.add_field(name="必要な投票数", value=f"あと{remaining_votes}票", inline=False)
+            embed.add_field(name="ボイスチャネルの人数", value=f"{num_members}人", inline=False)
+            await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name='stop', description='音楽を停止してキューをクリアします')
     async def stop(self, interaction: discord.Interaction):
@@ -768,6 +816,10 @@ class Music(commands.Cog):
         """次の曲を再生（非同期版）"""
         queue = self.get_queue(guild.id)
         voice_client = guild.voice_client
+
+        # 次の曲への移動時にスキップ投票をリセット
+        if guild.id in self.skip_votes:
+            self.skip_votes[guild.id].clear()
 
         if not queue.is_empty() or queue.repeat_mode == RepeatMode.ALL:
             song = queue.next()
