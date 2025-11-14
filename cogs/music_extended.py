@@ -440,14 +440,20 @@ class MusicExtended(commands.Cog):
                 guild_str = str(guild_id)
 
                 # ギルドの再生履歴から5曲以上あるか確認
-                cursor = self.db.conn.cursor()
-                cursor.execute('''
-                    SELECT COUNT(DISTINCT url) FROM music_history
-                    WHERE guild_id = ?
-                ''', (guild_str,))
+                try:
+                    conn = self.db._get_connection()
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        SELECT COUNT(DISTINCT url) FROM music_history
+                        WHERE guild_id = ?
+                    ''', (guild_str,))
 
-                result = cursor.fetchone()
-                song_count = result[0] if result else 0
+                    result = cursor.fetchone()
+                    song_count = result[0] if result else 0
+                    conn.close()
+                except Exception as e:
+                    logger.error(f"Error checking song count: {e}")
+                    song_count = 0
 
                 if song_count < 5:
                     await interaction.response.send_message(
