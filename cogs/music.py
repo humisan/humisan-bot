@@ -149,6 +149,8 @@ class Music(commands.Cog):
         self.playlists_file = 'playlists.json'
         self.playlists = self.load_playlists()
         self.skip_votes: Dict[int, set] = {}  # guild_id -> {user_ids}
+        self.idle_timers: Dict[int, float] = {}  # guild_id -> last_play_time
+        self.auto_disconnect_task.start()
 
     def load_favorites(self):
         """お気に入りを読み込む"""
@@ -808,6 +810,59 @@ class Music(commands.Cog):
                 except Exception as e:
                     logger.error(f"Error playing next song: {str(e)}")
 
+    # ==================== 自動切断機能 ====================
+
+    @tasks.loop(minutes=1)
+    async def auto_disconnect_task(self):
+        """30分以上の無音時を検出して自動切断"""
+        try:
+            current_time = time.time()
+            idle_threshold = 30 * 60  # 30分
+
+            for guild in self.bot.guilds:
+                try:
+                    voice_client = guild.voice_client
+
+                    # ボットがボイスチャネルに接続していない場合はスキップ
+                    if not voice_client or not voice_client.is_connected():
+                        if guild.id in self.idle_timers:
+                            del self.idle_timers[guild.id]
+                        continue
+
+                    # 曲が再生されている場合、タイマーをリセット
+                    if voice_client.is_playing():
+                        self.idle_timers[guild.id] = current_time
+                        continue
+
+                    # 初めてアイドル状態を検出した場合、現在時刻を記録
+                    if guild.id not in self.idle_timers:
+                        self.idle_timers[guild.id] = current_time
+                        logger.info(f"Guild {guild.name} ({guild.id}) started idle timer")
+                        continue
+
+                    # アイドル時間を計算
+                    idle_time = current_time - self.idle_timers[guild.id]
+
+                    # 30分以上アイドルの場合、自動切断
+                    if idle_time >= idle_threshold:
+                        queue = self.get_queue(guild.id)
+                        queue.clear()
+                        await voice_client.disconnect()
+                        del self.idle_timers[guild.id]
+                        logger.info(f"Auto-disconnected from guild {guild.name} ({guild.id}) after {idle_time / 60:.0f} minutes of idle")
+
+                except Exception as e:
+                    logger.error(f"Error checking idle timer for guild {guild.id}: {str(e)}")
+
+        except Exception as e:
+            logger.error(f"Error in auto_disconnect_task: {str(e)}")
+
+    @auto_disconnect_task.before_loop
+    async def before_auto_disconnect_task(self):
+        """タスク開始前の処理"""
+        await self.bot.wait_until_ready()
+        logger.info("Auto-disconnect task started")
+
     # プレイリスト機能
     playlist_group = app_commands.Group(name='playlist', description='プレイリスト機能')
 
@@ -1450,6 +1505,11 @@ class SearchView(discord.ui.View):
                     logger.error(f"Error sending error message: {str(e2)}")
 
         return callback
+
+    def cog_unload(self):
+        """Cog がアンロードされる時の処理"""
+        self.auto_disconnect_task.cancel()
+        logger.info("Music Cog unloaded")
 
 
 async def setup(bot: commands.Bot):
