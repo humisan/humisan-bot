@@ -177,6 +177,80 @@ class Music(commands.Cog):
                 return json.load(f)
         return {}
 
+    def get_queue_file(self, guild_id: int) -> str:
+        """ギルドのキューファイルパスを取得"""
+        return f'data/queue_{guild_id}.json'
+
+    def save_queue(self, guild_id: int):
+        """キューをJSONに保存"""
+        try:
+            queue = self.get_queue(guild_id)
+            queue_data = {
+                'current': None,
+                'queue': [],
+                'repeat_mode': queue.repeat_mode.value,
+                'shuffle': queue.shuffle
+            }
+
+            # 現在再生中の曲を保存
+            if queue.current:
+                queue_data['current'] = {
+                    'title': queue.current.get('title'),
+                    'webpage_url': queue.current.get('webpage_url'),
+                    'duration': queue.current.get('duration')
+                }
+
+            # キュー内の曲を保存
+            for song in queue.queue:
+                queue_data['queue'].append({
+                    'title': song.get('title'),
+                    'webpage_url': song.get('webpage_url'),
+                    'duration': song.get('duration')
+                })
+
+            queue_file = self.get_queue_file(guild_id)
+            os.makedirs(os.path.dirname(queue_file), exist_ok=True)
+            with open(queue_file, 'w', encoding='utf-8') as f:
+                json.dump(queue_data, f, ensure_ascii=False, indent=2)
+            logger.info(f"Queue saved for guild {guild_id} ({len(queue_data['queue'])} songs)")
+        except Exception as e:
+            logger.error(f"Error saving queue for guild {guild_id}: {str(e)}")
+
+    def load_queue(self, guild_id: int):
+        """JSONからキューを復元"""
+        try:
+            queue_file = self.get_queue_file(guild_id)
+            if not os.path.exists(queue_file):
+                logger.debug(f"No queue file found for guild {guild_id}")
+                return
+
+            with open(queue_file, 'r', encoding='utf-8') as f:
+                queue_data = json.load(f)
+
+            queue = self.get_queue(guild_id)
+
+            # キュー内の曲を復元
+            for song_data in queue_data.get('queue', []):
+                queue.add({
+                    'title': song_data.get('title'),
+                    'webpage_url': song_data.get('webpage_url'),
+                    'duration': song_data.get('duration'),
+                    'requester': None,  # リクエスター情報は復元不可
+                    'thumbnail': None
+                })
+
+            # リピートモードとシャッフルを復元
+            try:
+                queue.repeat_mode = RepeatMode(queue_data.get('repeat_mode', 0))
+            except:
+                queue.repeat_mode = RepeatMode.OFF
+
+            queue.shuffle = queue_data.get('shuffle', False)
+
+            logger.info(f"Queue restored for guild {guild_id} ({len(queue.queue)} songs)")
+        except Exception as e:
+            logger.error(f"Error loading queue for guild {guild_id}: {str(e)}")
+
     def save_playlists(self):
         """プレイリストを保存"""
         with open(self.playlists_file, 'w', encoding='utf-8') as f:
@@ -867,6 +941,13 @@ class Music(commands.Cog):
 
                 except Exception as e:
                     logger.error(f"Error playing next song: {str(e)}")
+        else:
+            # キューが空の場合、後から曲が追加されたときの対応
+            # キューに曲が残っていて再生されていない場合は、再度 play_next を呼ぶ
+            if not queue.is_empty() and not voice_client.is_playing():
+                logger.info(f"Queue has songs but nothing is playing, scheduling next play for guild {guild.id}")
+                await asyncio.sleep(0.5)  # 少し遅延させる
+                await self._play_next_async(guild)
 
     # ==================== 自動切断機能 ====================
 

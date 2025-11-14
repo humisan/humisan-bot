@@ -491,7 +491,7 @@ class MusicExtended(commands.Cog):
                         logger.info(f"Autoplay: Queue is empty in guild {guild_id}, fetching songs...")
 
                         # music_history から最近の曲を取得（ランダムサンプリング）
-                        recent_songs = self._get_random_songs_from_history(guild_id, limit=5)
+                        recent_songs = self._get_random_songs_from_history(str(guild_id), limit=5)
 
                         if recent_songs:
                             for song in recent_songs:
