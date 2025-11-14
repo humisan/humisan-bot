@@ -150,7 +150,13 @@ class Music(commands.Cog):
         self.playlists = self.load_playlists()
         self.skip_votes: Dict[int, set] = {}  # guild_id -> {user_ids}
         self.idle_timers: Dict[int, float] = {}  # guild_id -> last_play_time
-        self.auto_disconnect_task.start()
+
+        # Start background tasks
+        try:
+            if not self.auto_disconnect_task.is_running():
+                self.auto_disconnect_task.start()
+        except Exception as e:
+            logger.error(f"Failed to start auto_disconnect_task: {str(e)}")
 
     def load_favorites(self):
         """お気に入りを読み込む"""
