@@ -983,6 +983,98 @@ class Music(commands.Cog):
             )
         )
 
+    @playlist_group.command(name='import', description='共有されたプレイリストをインポート')
+    @app_commands.describe(code='共有コード')
+    async def playlist_import(self, interaction: discord.Interaction, code: str):
+        """共有されたプレイリストをインポート"""
+        user_id = str(interaction.user.id)
+
+        try:
+            # Base64 デコード
+            decoded = base64.b64decode(code).decode('utf-8')
+            playlist_data = json.loads(decoded)
+
+            # データ検証
+            if not isinstance(playlist_data, dict) or 'name' not in playlist_data or 'songs' not in playlist_data:
+                await interaction.response.send_message(
+                    embed=create_error_embed("無効なプレイリストコード", "コードが破損しているか、形式が正しくありません"),
+                    ephemeral=True
+                )
+                return
+
+            playlist_name = playlist_data['name']
+            songs = playlist_data['songs']
+
+            if not songs:
+                await interaction.response.send_message(
+                    embed=create_error_embed("空のプレイリスト", "このプレイリストには曲が含まれていません"),
+                    ephemeral=True
+                )
+                return
+
+            # ユーザーの プレイリストを初期化
+            if user_id not in self.playlists:
+                self.playlists[user_id] = {}
+
+            # 同じ名前のプレイリストが存在する場合の処理
+            if playlist_name in self.playlists[user_id]:
+                # 名前を変更
+                counter = 1
+                original_name = playlist_name
+                while f"{original_name}_{counter}" in self.playlists[user_id]:
+                    counter += 1
+                playlist_name = f"{original_name}_{counter}"
+
+            # プレイリストをインポート
+            imported_songs = []
+            for song in songs:
+                if isinstance(song, dict) and 'title' in song and 'url' in song:
+                    imported_songs.append({
+                        'title': song['title'],
+                        'url': song['url'],
+                        'webpage_url': song.get('url'),
+                        'duration': song.get('duration', 0)
+                    })
+
+            if not imported_songs:
+                await interaction.response.send_message(
+                    embed=create_error_embed("インポート失敗", "有効な曲情報が見つかりませんでした"),
+                    ephemeral=True
+                )
+                return
+
+            self.playlists[user_id][playlist_name] = imported_songs
+            self.save_playlists()
+
+            # 作成者情報を表示
+            created_by = playlist_data.get('created_by', '不明')
+
+            embed = discord.Embed(
+                title="📥 プレイリストインポート",
+                color=discord.Color.green(),
+                timestamp=discord.utils.utcnow()
+            )
+            embed.add_field(name="プレイリスト名", value=f"**{playlist_name}**", inline=False)
+            embed.add_field(name="曲数", value=f"**{len(imported_songs)}** 曲", inline=True)
+            embed.add_field(name="作成者", value=f"**{created_by}**", inline=True)
+            embed.set_footer(text="このプレイリストは /playlist load で再生できます")
+
+            await interaction.response.send_message(embed=embed)
+            logger.info(f"User {interaction.user.name} imported playlist: {playlist_name} ({len(imported_songs)} songs)")
+
+        except (base64.binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+            await interaction.response.send_message(
+                embed=create_error_embed("デコード失敗", "コードが正しく形式化されていません"),
+                ephemeral=True
+            )
+            logger.error(f"Failed to decode playlist code: {str(code[:20])}")
+        except Exception as e:
+            logger.error(f"Error importing playlist: {str(e)}")
+            await interaction.response.send_message(
+                embed=create_error_embed("インポート失敗", str(e)),
+                ephemeral=True
+            )
+
     @playlist_group.command(name='list', description='プレイリスト一覧を表示')
     async def playlist_list(self, interaction: discord.Interaction):
         """プレイリスト一覧を表示"""
