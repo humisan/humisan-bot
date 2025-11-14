@@ -4,8 +4,7 @@ __pycache__/
 *.pyc
 *.log
 logs/
-data/playlists.json
-data/favorites.json
+data/
 .DS_Store
 .vscode/
 .idea/
