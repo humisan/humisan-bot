@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 import base64
 import json
 import os
+import time
+import re
 from dotenv import load_dotenv
 from utils.database import get_database
 from utils.logger import setup_logger
@@ -415,10 +417,10 @@ class MusicExtended(commands.Cog):
 
     @app_commands.command(
         name="autoplay",
-        description="24/7自動再生モードを切り替えます",
+        description="24/7自動再生モードを切り替えます（5曲以上の再生履歴が必要）",
     )
     async def autoplay(self, interaction: discord.Interaction):
-        """24/7自動再生を切り替え"""
+        """24/7自動再生を切り替え（5曲以上の再生履歴が必要）"""
         try:
             guild_id = interaction.guild_id
 
@@ -434,6 +436,31 @@ class MusicExtended(commands.Cog):
                 )
                 logger.info(f"Autoplay disabled for guild {guild_id}")
             else:
+                # 自動再生を開始する前に再生履歴をチェック
+                guild_str = str(guild_id)
+
+                # ギルドの再生履歴から5曲以上あるか確認
+                cursor = self.db.conn.cursor()
+                cursor.execute('''
+                    SELECT COUNT(DISTINCT url) FROM music_history
+                    WHERE guild_id = ?
+                ''', (guild_str,))
+
+                result = cursor.fetchone()
+                song_count = result[0] if result else 0
+
+                if song_count < 5:
+                    await interaction.response.send_message(
+                        embed=create_error_embed(
+                            "自動再生に失敗しました",
+                            f"自動再生を使用するには、5曲以上の再生履歴が必要です。\n"
+                            f"現在: {song_count}曲"
+                        ),
+                        ephemeral=True
+                    )
+                    logger.info(f"Autoplay rejected for guild {guild_id} - only {song_count} songs in history")
+                    return
+
                 # 自動再生を開始
                 autoplay_sessions[guild_id] = {
                     'enabled': True,
@@ -443,7 +470,7 @@ class MusicExtended(commands.Cog):
                     embed=create_success_embed(
                         "自動再生開始",
                         "24/7自動再生モードを開始しました。\n"
-                        "キューが空になると自動的に曲が追加されます。"
+                        "キューが空になると、統計から類似した曲を自動検索して追加します。"
                     )
                 )
                 logger.info(f"Autoplay enabled for guild {guild_id}")
@@ -459,7 +486,7 @@ class MusicExtended(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def autoplay_loop(self):
-        """24/7自動再生のバックグラウンドループ"""
+        """24/7自動再生のバックグラウンドループ（統計から類似曲を検索して追加）"""
         try:
             # Music Cog を取得
             music_cog = self.bot.get_cog('Music')
@@ -486,48 +513,130 @@ class MusicExtended(commands.Cog):
                     # キューを取得
                     queue = music_cog.get_queue(guild_id)
 
-                    # キューが空かつ何も再生されていない場合、曲を追加
+                    # キューが空かつ何も再生されていない場合、類似曲を検索して追加
                     if queue.is_empty() and not voice_client.is_playing():
-                        logger.info(f"Autoplay: Queue is empty in guild {guild_id}, fetching songs...")
+                        logger.info(f"Autoplay: Queue is empty in guild {guild_id}, searching for similar songs...")
 
-                        # music_history から最近の曲を取得（ランダムサンプリング）
-                        recent_songs = self._get_random_songs_from_history(str(guild_id), limit=5)
+                        # ギルドの再生統計から人気の曲を取得
+                        guild_str = str(guild_id)
+                        top_songs = self.db.get_top_songs(guild_str, limit=5)
 
-                        if recent_songs:
-                            for song in recent_songs:
-                                # song オブジェクトを作成
-                                song_obj = {
-                                    'title': song['title'],
-                                    'url': song['url'],
-                                    'webpage_url': song['url'],
-                                    'duration': song.get('duration'),
-                                    'requester': guild.me,  # ボット自身をリクエスター扱い
-                                    'thumbnail': None
-                                }
-                                queue.add(song_obj)
-                                logger.info(f"Autoplay: Added '{song['title']}' to queue")
+                        if top_songs:
+                            # 各人気曲から類似曲を検索
+                            similar_songs = await self._search_similar_songs(top_songs, music_cog, limit=5)
 
-                            # 最初の曲を再生
-                            if queue.current is None and queue.queue:
-                                next_song = queue.queue.pop(0)
-                                queue.current = next_song
-                                queue.start_time = time.time()
+                            if similar_songs:
+                                for song in similar_songs:
+                                    # song オブジェクトを作成
+                                    song_obj = {
+                                        'title': song['title'],
+                                        'url': song['webpage_url'],
+                                        'webpage_url': song['webpage_url'],
+                                        'duration': song.get('duration'),
+                                        'requester': guild.me,  # ボット自身をリクエスター扱い
+                                        'thumbnail': song.get('thumbnail')
+                                    }
+                                    queue.add(song_obj)
+                                    logger.info(f"Autoplay: Added '{song['title']}' to queue (similar to stats)")
 
-                                try:
-                                    from cogs.music import YTDLSource
-                                    player = await YTDLSource.from_url(next_song['webpage_url'], loop=self.bot.loop, stream=True)
-                                    voice_client.play(player, after=lambda e: music_cog.play_next(guild))
-                                    logger.info(f"Autoplay: Started playing '{next_song['title']}'")
-                                except Exception as e:
-                                    logger.error(f"Autoplay: Error playing song: {str(e)}")
+                                # 最初の曲を再生
+                                if queue.current is None and queue.queue:
+                                    next_song = queue.queue.pop(0)
+                                    queue.current = next_song
+                                    queue.start_time = time.time()
+
+                                    try:
+                                        from cogs.music import YTDLSource
+                                        player = await YTDLSource.from_url(next_song['webpage_url'], loop=self.bot.loop, stream=True)
+                                        voice_client.play(player, after=lambda e: music_cog.play_next(guild))
+                                        logger.info(f"Autoplay: Started playing '{next_song['title']}'")
+                                    except Exception as e:
+                                        logger.error(f"Autoplay: Error playing song: {str(e)}")
+                            else:
+                                logger.debug(f"Autoplay: Could not find similar songs for guild {guild_id}")
                         else:
-                            logger.debug(f"Autoplay: No songs found in history for guild {guild_id}")
+                            logger.debug(f"Autoplay: No top songs found in stats for guild {guild_id}")
 
                 except Exception as e:
                     logger.error(f"Autoplay error for guild {guild_id}: {str(e)}")
 
         except Exception as e:
             logger.error(f"Error in autoplay loop: {e}")
+
+    async def _search_similar_songs(self, top_songs: List[Dict], music_cog, limit: int = 5) -> List[Dict]:
+        """
+        トップ曲から類似曲を検索
+
+        Args:
+            top_songs: top_songs list from get_top_songs
+            music_cog: Music Cog instance with search_songs method
+            limit: Number of songs to return
+
+        Returns:
+            List of similar songs from YouTube
+        """
+        try:
+            similar_songs = []
+            searched_urls = set()
+
+            for top_song in top_songs:
+                if len(similar_songs) >= limit:
+                    break
+
+                try:
+                    title = top_song.get('title', '')
+
+                    # 曲名からアーティスト名を抽出（"アーティスト - 曲名" または "アーティスト - title" 形式に対応）
+                    artist = None
+                    if ' - ' in title:
+                        parts = title.split(' - ')
+                        artist = parts[0].strip()
+
+                    # 検索クエリを生成
+                    search_queries = []
+
+                    # アーティスト名で検索
+                    if artist and len(artist) > 2:
+                        search_queries.append(f"{artist} songs")
+                        search_queries.append(f"{artist} popular")
+
+                    # 曲名全体で検索
+                    search_queries.append(title)
+
+                    # クエリを検索
+                    for query in search_queries:
+                        if len(similar_songs) >= limit:
+                            break
+
+                        logger.debug(f"Autoplay: Searching for similar songs with query: '{query}'")
+
+                        try:
+                            search_results = await music_cog.search_songs(query, limit=5)
+
+                            for result in search_results:
+                                if len(similar_songs) >= limit:
+                                    break
+
+                                # 既に統計にある曲は除外
+                                url = result.get('webpage_url') or result.get('url')
+                                if url and url not in searched_urls and url != top_song.get('url'):
+                                    similar_songs.append(result)
+                                    searched_urls.add(url)
+                                    logger.debug(f"Autoplay: Found similar song: '{result.get('title')}'")
+                        except Exception as e:
+                            logger.warning(f"Autoplay: Error searching with query '{query}': {str(e)}")
+                            continue
+
+                except Exception as e:
+                    logger.warning(f"Autoplay: Error processing top song '{top_song.get('title')}': {str(e)}")
+                    continue
+
+            logger.info(f"Autoplay: Found {len(similar_songs)} similar songs")
+            return similar_songs[:limit]
+
+        except Exception as e:
+            logger.error(f"Error in _search_similar_songs: {str(e)}")
+            return []
 
     def _get_random_songs_from_history(self, guild_id: str, limit: int = 5) -> List[Dict]:
         """再生履歴からランダムに曲を取得"""
