@@ -250,14 +250,16 @@ class MusicExtended(commands.Cog):
     async def recommend(self, interaction: discord.Interaction):
         """推奨曲を提案"""
         try:
+            await interaction.response.defer()
+
             guild_id = str(interaction.guild_id)
             user_id = str(interaction.user.id)
 
-            # ユーザーの再生履歴からジャンルを取得
-            genres = self.db.get_genre_history(guild_id, user_id, limit=20)
+            # ユーザーの再生履歴をチェック
+            user_stats = self.db.get_user_stats(guild_id, user_id)
 
-            if not genres:
-                await interaction.response.send_message(
+            if not user_stats or user_stats['total_plays'] == 0:
+                await interaction.followup.send(
                     embed=create_error_embed(
                         "推奨情報がありません",
                         "再生履歴がまだありません。\n"
@@ -267,53 +269,75 @@ class MusicExtended(commands.Cog):
                 )
                 return
 
-            # 最も再生されたジャンルを取得
-            favorite_genre = max(set(genres), key=genres.count) if genres else None
+            # ユーザーのトップ曲を取得
+            top_songs = self.db.get_top_songs(guild_id, limit=3, user_id=user_id)
 
+            if not top_songs:
+                await interaction.followup.send(
+                    embed=create_error_embed(
+                        "推奨情報がありません",
+                        "再生履歴から推奨曲を生成できませんでした。"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Music Cog を取得
+            music_cog = self.bot.get_cog('Music')
+            if not music_cog:
+                await interaction.followup.send(
+                    embed=create_error_embed("エラー", "Music Cog が見つかりません"),
+                    ephemeral=True
+                )
+                return
+
+            # トップ曲から類似曲を検索
+            similar_songs = await self._search_similar_songs(top_songs, music_cog, limit=5)
+
+            if not similar_songs:
+                await interaction.followup.send(
+                    embed=create_error_embed(
+                        "推奨曲が見つかりません",
+                        "類似曲を検索できませんでした。しばらく後に試してください。"
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # 推奨曲を表示
             embed = discord.Embed(
                 title="🎯 推奨曲",
+                description="あなたの再生履歴から推奨される曲です",
                 color=discord.Color.green()
             )
 
-            if favorite_genre:
-                embed.add_field(
-                    name="あなたが好きなジャンル",
-                    value=f"**{favorite_genre}**",
-                    inline=False
-                )
-                embed.add_field(
-                    name="推奨",
-                    value=f"{favorite_genre} のジャンルの曲を検索してみてください！\n"
-                          f"YouTube や Spotify で `{favorite_genre}` で検索すると、\n"
-                          f"あなたの好みに合った曲が見つかるかもしれません。",
-                    inline=False
-                )
-            else:
-                embed.add_field(
-                    name="ジャンル情報",
-                    value="再生履歴からジャンル情報が取得できませんでした。",
-                    inline=False
-                )
+            # ユーザーのお気に入り（トップ曲）を表示
+            favorite_songs_text = "\n".join(
+                [f"• [{song['title']}]({song['url']})" for song in top_songs[:3]]
+            )
+            embed.add_field(
+                name="📊 あなたのお気に入り曲",
+                value=favorite_songs_text,
+                inline=False
+            )
 
-            # トップ曲も表示
-            top_songs = self.db.get_top_songs(guild_id, limit=3, user_id=user_id)
-            if top_songs:
-                similar_songs = "\n".join(
-                    [f"• {song['title']}" for song in top_songs]
-                )
-                embed.add_field(
-                    name="あなたのお気に入り",
-                    value=similar_songs,
-                    inline=False
-                )
+            # 推奨曲を表示
+            recommend_songs_text = "\n".join(
+                [f"• [{song['title']}]({song.get('webpage_url', song.get('url', ''))})" for song in similar_songs[:5]]
+            )
+            embed.add_field(
+                name="💡 推奨曲",
+                value=recommend_songs_text,
+                inline=False
+            )
 
-            embed.set_footer(text="新しい曲を探してみてください！")
-            await interaction.response.send_message(embed=embed)
+            embed.set_footer(text="推奨曲を /play コマンドで再生できます")
+            await interaction.followup.send(embed=embed)
             logger.info(f"Recommend command executed for {interaction.user.name}")
 
         except Exception as e:
             logger.error(f"Error in recommend command: {e}")
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 embed=create_error_embed("推奨の取得に失敗しました", str(e)),
                 ephemeral=True
             )
