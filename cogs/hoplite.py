@@ -317,11 +317,11 @@ class HopliteCog(commands.Cog):
 
     # ==================== SLASH COMMANDS ====================
 
-    hoplite_group = app_commands.Group(name="hoplite", description="Hoplite status monitoring commands")
+    hoplite_group = app_commands.Group(name="hoplite", description="Hopliteのステータスおよびプレイヤー統計情報を確認")
 
-    @hoplite_group.command(name="status", description="Check current Hoplite status")
+    @hoplite_group.command(name="status", description="Hopliteの現在のサービスステータスを確認")
     async def hoplite_status(self, interaction: discord.Interaction):
-        """Display current Hoplite service status"""
+        """Hopliteのサービスステータスを表示"""
         await interaction.response.defer()
 
         try:
@@ -332,8 +332,8 @@ class HopliteCog(commands.Cog):
             if not status_data:
                 await interaction.followup.send(
                     embed=create_error_embed(
-                        "Failed to fetch status",
-                        "Could not retrieve Hoplite status. Please try again later."
+                        "ステータス取得失敗",
+                        "Hopliteのステータスを取得できませんでした。後でもう一度試してください。"
                     ),
                     ephemeral=True
                 )
@@ -349,14 +349,14 @@ class HopliteCog(commands.Cog):
             status_color = self._get_status_color(status_indicator)
 
             embed = discord.Embed(
-                title="🌐 Hoplite Service Status",
+                title="🌐 Hopliteサービスステータス",
                 color=status_color,
                 timestamp=discord.utils.utcnow()
             )
 
             # Overall status
             embed.add_field(
-                name="Overall Status",
+                name="全体ステータス",
                 value=self._format_status(status_indicator),
                 inline=False
             )
@@ -366,47 +366,47 @@ class HopliteCog(commands.Cog):
                 component_status = self._format_components(components)
                 if component_status:
                     embed.add_field(
-                        name="Components",
+                        name="コンポーネント",
                         value=component_status,
                         inline=False
                     )
 
             # Active incidents
             if incidents:
-                incident_text = f"⚠️ **{len(incidents)} Active Incident(s)**\n"
+                incident_text = f"⚠️ **アクティブなインシデント: {len(incidents)}件**\n"
                 for incident in incidents[:3]:  # Show max 3 incidents
-                    incident_text += f"• {incident.get('name', 'Unknown')}\n"
+                    incident_text += f"• {incident.get('name', '不明')}\n"
                 if len(incidents) > 3:
-                    incident_text += f"• ... and {len(incidents) - 3} more"
+                    incident_text += f"• その他 {len(incidents) - 3} 件"
 
                 embed.add_field(
-                    name="Incidents",
+                    name="インシデント",
                     value=incident_text,
                     inline=False
                 )
             else:
                 embed.add_field(
-                    name="Incidents",
-                    value="✅ No active incidents",
+                    name="インシデント",
+                    value="✅ アクティブなインシデントはありません",
                     inline=False
                 )
 
             # Last updated
-            updated_time = page.get('updated_at', 'Unknown')
-            embed.set_footer(text=f"Last updated: {updated_time}")
+            updated_time = page.get('updated_at', '不明')
+            embed.set_footer(text=f"最終更新: {updated_time}")
 
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in hoplite status command: {e}")
             await interaction.followup.send(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
-    @hoplite_group.command(name="components", description="View detailed component status")
+    @hoplite_group.command(name="components", description="Hopliteのコンポーネント詳細ステータスを確認")
     async def hoplite_components(self, interaction: discord.Interaction):
-        """Display detailed Hoplite component information"""
+        """Hopliteのコンポーネント詳細情報を表示"""
         await interaction.response.defer()
 
         try:
@@ -417,8 +417,8 @@ class HopliteCog(commands.Cog):
             if not components_data:
                 await interaction.followup.send(
                     embed=create_error_embed(
-                        "Failed to fetch components",
-                        "Could not retrieve Hoplite components. Please try again later."
+                        "コンポーネント取得失敗",
+                        "Hopliteのコンポーネント情報を取得できませんでした。後でもう一度試してください。"
                     ),
                     ephemeral=True
                 )
@@ -428,21 +428,21 @@ class HopliteCog(commands.Cog):
 
             if not components:
                 await interaction.followup.send(
-                    embed=create_error_embed("No components found", "No Hoplite components available."),
+                    embed=create_error_embed("コンポーネントが見つかりません", "利用可能なHopliteコンポーネントがありません。"),
                     ephemeral=True
                 )
                 return
 
             # Create component status embed
             embed = discord.Embed(
-                title="📊 Hoplite Component Status",
+                title="📊 Hopliteコンポーネントステータス",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
             for component in components:
                 status = component.get('status', 'unknown')
-                name = component.get('name', 'Unknown')
+                name = component.get('name', '不明')
                 description = component.get('description', '')
 
                 status_emoji = self._get_status_emoji(status)
@@ -457,25 +457,25 @@ class HopliteCog(commands.Cog):
                     inline=False
                 )
 
-            embed.set_footer(text=f"Total components: {len(components)}")
+            embed.set_footer(text=f"総コンポーネント数: {len(components)}")
 
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in hoplite components command: {e}")
             await interaction.followup.send(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
-    @hoplite_group.command(name="player", description="Get player statistics from Hoplite Tracker")
+    @hoplite_group.command(name="player", description="Hoplite Trackerからプレイヤーの統計情報を取得")
     @app_commands.describe(
-        player_name="Player's username",
-        game_mode="Game mode (battle-royale or civilization)"
+        player_name="プレイヤー名",
+        game_mode="ゲームモード (battle-royale または civilization)"
     )
     async def hoplite_player(self, interaction: discord.Interaction, player_name: str,
                              game_mode: str = "battle-royale"):
-        """Get player statistics from Hoplite Tracker"""
+        """Hoplite Trackerからプレイヤーの統計情報を取得"""
         await interaction.response.defer()
 
         try:
@@ -494,9 +494,9 @@ class HopliteCog(commands.Cog):
             if not stats:
                 await interaction.followup.send(
                     embed=create_error_embed(
-                        "Player not found",
-                        f"Could not find player '{player_name}' on Hoplite Tracker.\n"
-                        f"Please check the spelling and try again."
+                        "プレイヤーが見つかりません",
+                        f"Hoplite Trackerで'{player_name}'プレイヤーが見つかりませんでした。\n"
+                        f"スペルを確認して再度試してください。"
                     ),
                     ephemeral=True
                 )
@@ -504,20 +504,20 @@ class HopliteCog(commands.Cog):
 
             # Create player stats embed
             embed = discord.Embed(
-                title=f"📊 {stats['player_name']} - Stats",
+                title=f"📊 {stats['player_name']} - 統計情報",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
             # Add basic stats
             embed.add_field(
-                name="Wins",
+                name="勝利数",
                 value=f"🏆 {stats['wins']:,}",
                 inline=True
             )
 
             embed.add_field(
-                name="Kills",
+                name="キル数",
                 value=f"⚔️ {stats['kills']:,}",
                 inline=True
             )
@@ -528,7 +528,7 @@ class HopliteCog(commands.Cog):
                 kd_ratio = stats['kills'] / max(1, stats['games_played'])
 
             embed.add_field(
-                name="K/D Ratio",
+                name="K/D比",
                 value=f"📈 {kd_ratio:.2f}",
                 inline=True
             )
@@ -536,7 +536,7 @@ class HopliteCog(commands.Cog):
             # Add games played
             if stats['games_played'] > 0:
                 embed.add_field(
-                    name="Games Played",
+                    name="プレイ数",
                     value=f"🎮 {stats['games_played']:,}",
                     inline=True
                 )
@@ -545,15 +545,15 @@ class HopliteCog(commands.Cog):
             if stats['games_played'] > 0:
                 win_rate = (stats['wins'] / stats['games_played']) * 100
                 embed.add_field(
-                    name="Win Rate",
+                    name="勝率",
                     value=f"📊 {win_rate:.1f}%",
                     inline=True
                 )
 
             # Add game mode info
-            mode_display = "Battle Royale" if game_mode == "battle-royale" else "Civilization"
+            mode_display = "バトルロイヤル" if game_mode == "battle-royale" else "文明"
             embed.add_field(
-                name="Game Mode",
+                name="ゲームモード",
                 value=f"🎯 {mode_display}",
                 inline=True
             )
@@ -562,29 +562,29 @@ class HopliteCog(commands.Cog):
             if stats.get('top_kits'):
                 kits_text = ", ".join(str(kit) for kit in stats['top_kits'][:5])
                 embed.add_field(
-                    name="Top Kits",
+                    name="使用キット",
                     value=kits_text if kits_text else "N/A",
                     inline=False
                 )
 
-            embed.set_footer(text=f"Data from Hoplite Tracker | Requested by {interaction.user}")
+            embed.set_footer(text=f"Hoplite Tracker より | リクエスト: {interaction.user}")
 
             await interaction.followup.send(embed=embed)
 
         except Exception as e:
             logger.error(f"Error in hoplite player command: {e}")
             await interaction.followup.send(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
     # Create subcommand group for monitor
-    monitor_group = app_commands.Group(name="monitor", description="Manage Hoplite status monitoring")
+    monitor_group = app_commands.Group(name="monitor", description="Hopliteのステータス監視を管理")
 
-    @monitor_group.command(name="enable", description="Enable Hoplite status monitoring for this server")
-    @app_commands.describe(channel="The channel where notifications will be sent")
+    @monitor_group.command(name="enable", description="このサーバーでHopliteのステータス監視を有効化")
+    @app_commands.describe(channel="通知を送信するチャネル")
     async def monitor_enable(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        """Enable monitoring and set notification channel"""
+        """監視を有効化し、通知先チャネルを設定"""
         # Initialize database if not already done
         if self.db is None:
             from utils.database import get_database
@@ -594,8 +594,8 @@ class HopliteCog(commands.Cog):
         if not channel.permissions_for(interaction.guild.me).send_messages:
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    "Missing permissions",
-                    f"I don't have permission to send messages in {channel.mention}"
+                    "権限がありません",
+                    f"{channel.mention} へのメッセージ送信権限がありません。"
                 ),
                 ephemeral=True
             )
@@ -605,8 +605,8 @@ class HopliteCog(commands.Cog):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    "Missing permissions",
-                    "You need 'Manage Server' permission to use this command"
+                    "権限がありません",
+                    "このコマンドを実行するには「サーバー管理」権限が必要です。"
                 ),
                 ephemeral=True
             )
@@ -620,27 +620,27 @@ class HopliteCog(commands.Cog):
                 logger.info(f"Hoplite monitoring enabled for guild {guild_id}")
                 await interaction.response.send_message(
                     embed=create_success_embed(
-                        "Monitoring enabled",
-                        f"Hoplite status monitoring is now active.\nNotifications will be sent to {channel.mention}"
+                        "監視を有効化しました",
+                        f"Hopliteのステータス監視が有効になります。\n通知は {channel.mention} に送信されます。"
                     ),
                     ephemeral=True
                 )
             else:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Failed to enable monitoring", "Please try again later"),
+                    embed=create_error_embed("監視の有効化に失敗しました", "後でもう一度試してください。"),
                     ephemeral=True
                 )
 
         except Exception as e:
             logger.error(f"Error enabling monitoring: {e}")
             await interaction.response.send_message(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
-    @monitor_group.command(name="disable", description="Disable Hoplite status monitoring for this server")
+    @monitor_group.command(name="disable", description="このサーバーでHopliteのステータス監視を無効化")
     async def monitor_disable(self, interaction: discord.Interaction):
-        """Disable monitoring"""
+        """監視を無効化"""
         # Initialize database if not already done
         if self.db is None:
             from utils.database import get_database
@@ -650,8 +650,8 @@ class HopliteCog(commands.Cog):
         if not interaction.user.guild_permissions.manage_guild:
             await interaction.response.send_message(
                 embed=create_error_embed(
-                    "Missing permissions",
-                    "You need 'Manage Server' permission to use this command"
+                    "権限がありません",
+                    "このコマンドを実行するには「サーバー管理」権限が必要です。"
                 ),
                 ephemeral=True
             )
@@ -664,27 +664,27 @@ class HopliteCog(commands.Cog):
                 logger.info(f"Hoplite monitoring disabled for guild {guild_id}")
                 await interaction.response.send_message(
                     embed=create_success_embed(
-                        "Monitoring disabled",
-                        "Hoplite status monitoring has been disabled for this server"
+                        "監視を無効化しました",
+                        "このサーバーでのHopliteのステータス監視が無効になりました。"
                     ),
                     ephemeral=True
                 )
             else:
                 await interaction.response.send_message(
-                    embed=create_error_embed("Failed to disable monitoring", "Please try again later"),
+                    embed=create_error_embed("監視の無効化に失敗しました", "後でもう一度試してください。"),
                     ephemeral=True
                 )
 
         except Exception as e:
             logger.error(f"Error disabling monitoring: {e}")
             await interaction.response.send_message(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
-    @monitor_group.command(name="view", description="View current monitoring settings")
+    @monitor_group.command(name="view", description="現在の監視設定を確認")
     async def monitor_view(self, interaction: discord.Interaction):
-        """View monitoring settings"""
+        """監視設定を表示"""
         # Initialize database if not already done
         if self.db is None:
             from utils.database import get_database
@@ -698,37 +698,37 @@ class HopliteCog(commands.Cog):
             if not monitoring_settings:
                 await interaction.response.send_message(
                     embed=create_error_embed(
-                        "Monitoring not configured",
-                        "Hoplite status monitoring is not enabled for this server.\n"
-                        "Use `/hoplite monitor-enable` to set it up."
+                        "監視が設定されていません",
+                        "このサーバーではHopliteのステータス監視が有効になっていません。\n"
+                        "`/hoplite monitor enable` で設定してください。"
                     ),
                     ephemeral=True
                 )
                 return
 
             channel = self.bot.get_channel(int(monitoring_settings['channel_id']))
-            status = "✅ Enabled" if monitoring_settings['enabled'] else "❌ Disabled"
+            status = "✅ 有効" if monitoring_settings['enabled'] else "❌ 無効"
 
             embed = discord.Embed(
-                title="📋 Monitoring Settings",
+                title="📋 監視設定",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
-            embed.add_field(name="Status", value=status, inline=False)
+            embed.add_field(name="ステータス", value=status, inline=False)
             embed.add_field(
-                name="Notification Channel",
-                value=f"{channel.mention}" if channel else "Channel not found",
+                name="通知先チャネル",
+                value=f"{channel.mention}" if channel else "チャネルが見つかりません",
                 inline=False
             )
 
             last_status = monitoring_settings.get('last_status')
             if last_status:
-                embed.add_field(name="Last Known Status", value=last_status, inline=False)
+                embed.add_field(name="最後のステータス", value=last_status, inline=False)
 
             embed.add_field(
-                name="Monitoring Since",
-                value=monitoring_settings.get('created_at', 'Unknown'),
+                name="監視開始日時",
+                value=monitoring_settings.get('created_at', '不明'),
                 inline=False
             )
 
@@ -737,7 +737,7 @@ class HopliteCog(commands.Cog):
         except Exception as e:
             logger.error(f"Error viewing monitoring settings: {e}")
             await interaction.response.send_message(
-                embed=create_error_embed("An error occurred", str(e)),
+                embed=create_error_embed("エラーが発生しました", str(e)),
                 ephemeral=True
             )
 
@@ -846,7 +846,7 @@ class HopliteCog(commands.Cog):
             to_emoji = self._get_status_emoji(to_status)
 
             embed = discord.Embed(
-                title="🔔 Hoplite Status Change",
+                title="🔔 Hopliteステータス変更",
                 description=f"{from_emoji} **{from_status.upper()}** → {to_emoji} **{to_status.upper()}**",
                 color=self._get_status_color(to_status),
                 timestamp=discord.utils.utcnow()
@@ -864,8 +864,8 @@ class HopliteCog(commands.Cog):
         """Send incident notification"""
         try:
             embed = discord.Embed(
-                title="⚠️ Hoplite Incident Reported",
-                description=incident.get('name', 'Unknown incident'),
+                title="⚠️ Hopliteインシデント報告",
+                description=incident.get('name', '不明なインシデント'),
                 color=discord.Color.orange(),
                 timestamp=discord.utils.utcnow()
             )
@@ -873,19 +873,19 @@ class HopliteCog(commands.Cog):
             status = incident.get('status', 'unknown')
             impact = incident.get('impact', 'unknown')
 
-            embed.add_field(name="Status", value=status, inline=True)
-            embed.add_field(name="Impact", value=impact, inline=True)
+            embed.add_field(name="ステータス", value=status, inline=True)
+            embed.add_field(name="影響", value=impact, inline=True)
 
             body = incident.get('body')
             if body:
                 # Truncate long descriptions
                 if len(body) > 1024:
                     body = body[:1021] + "..."
-                embed.add_field(name="Details", value=body, inline=False)
+                embed.add_field(name="詳細", value=body, inline=False)
 
             created_at = incident.get('created_at')
             if created_at:
-                embed.set_footer(text=f"Reported: {created_at}")
+                embed.set_footer(text=f"報告日時: {created_at}")
 
             await channel.send(embed=embed)
             logger.info(f"Incident notification sent to channel {channel.id}")
@@ -899,8 +899,8 @@ class HopliteCog(commands.Cog):
         """Send incident resolved notification"""
         try:
             embed = discord.Embed(
-                title="✅ Incident Resolved",
-                description=f"Incident #{incident_id} has been resolved",
+                title="✅ インシデント解決",
+                description=f"インシデント #{incident_id} は解決しました。",
                 color=discord.Color.green(),
                 timestamp=discord.utils.utcnow()
             )
