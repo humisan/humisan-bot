@@ -7,6 +7,7 @@ import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from bs4 import BeautifulSoup
+from urllib.parse import quote
 from utils.logger import setup_logger
 from utils.helpers import create_error_embed, create_success_embed
 
@@ -140,7 +141,11 @@ class HopliteTrackerAPI:
             return self._cache.get(cache_key)
 
         try:
-            url = f"{self.base_url}/player/{player_name}/{game_mode}"
+            # URL encode the player name to handle special characters
+            encoded_player_name = quote(player_name, safe='')
+            url = f"{self.base_url}/player/{encoded_player_name}/{game_mode}"
+
+            logger.debug(f"Fetching player stats from: {url}")
 
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.get(url, headers={
@@ -159,10 +164,14 @@ class HopliteTrackerAPI:
                             logger.warning(f"Failed to parse player page for {player_name}")
                             return None
                     elif response.status == 404:
-                        logger.warning(f"Player {player_name} not found")
+                        logger.warning(f"Player {player_name} not found (404)")
+                        return None
+                    elif response.status == 500:
+                        logger.error(f"Hoplite Tracker server error (500) for {player_name}")
+                        logger.debug(f"Request URL: {url}")
                         return None
                     else:
-                        logger.error(f"Hoplite Tracker returned status {response.status} for {player_name}")
+                        logger.error(f"Hoplite Tracker returned status {response.status} for {player_name} (URL: {url})")
                         return None
 
         except asyncio.TimeoutError:
@@ -496,7 +505,8 @@ class HopliteCog(commands.Cog):
                     embed=create_error_embed(
                         "プレイヤーが見つかりません",
                         f"Hoplite Trackerで'{player_name}'プレイヤーが見つかりませんでした。\n"
-                        f"スペルを確認して再度試してください。"
+                        f"スペルを確認して再度試してください。\n\n"
+                        f"*Hoplite Trackerがアクセスできない場合は、しばらく待ってから試してください。*"
                     ),
                     ephemeral=True
                 )
