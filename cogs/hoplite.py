@@ -6,6 +6,7 @@ import asyncio
 import json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from bs4 import BeautifulSoup
 from utils.logger import setup_logger
 from utils.helpers import create_error_embed, create_success_embed
 
@@ -15,6 +16,7 @@ logger = setup_logger(__name__)
 HOPLITE_API_BASE = "https://status.hoplite.gg"
 HOPLITE_SUMMARY_URL = f"{HOPLITE_API_BASE}/summary.json"
 HOPLITE_COMPONENTS_URL = f"{HOPLITE_API_BASE}/v2/components.json"
+HOPLITE_TRACKER_BASE = "https://www.hoplitetracker.com"
 POLLING_INTERVAL = 300  # 5 minutes in seconds
 
 
@@ -109,12 +111,193 @@ class HopliteAPI:
         self._cache_time.clear()
 
 
+class HopliteTrackerAPI:
+    """Hoplite Tracker scraping API for retrieving player statistics"""
+
+    def __init__(self):
+        self.base_url = HOPLITE_TRACKER_BASE
+        self.timeout = aiohttp.ClientTimeout(total=15)
+        self._cache = {}
+        self._cache_time = {}
+
+    async def get_player_stats(self, player_name: str, game_mode: str = "battle-royale",
+                               use_cache: bool = True) -> Optional[Dict[str, Any]]:
+        """
+        Get player statistics from Hoplite Tracker
+
+        Args:
+            player_name: Player's username
+            game_mode: Game mode (battle-royale, civilization)
+            use_cache: Whether to use cached data
+
+        Returns:
+            Dictionary with player statistics or None if error
+        """
+        cache_key = f"{player_name}:{game_mode}"
+
+        if use_cache and self._is_cache_valid(cache_key):
+            logger.debug(f"Using cached player data for {player_name}")
+            return self._cache.get(cache_key)
+
+        try:
+            url = f"{self.base_url}/player/{player_name}/{game_mode}"
+
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.get(url, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }) as response:
+                    if response.status == 200:
+                        html = await response.text()
+                        stats = await self._parse_player_page(html, player_name, game_mode)
+
+                        if stats:
+                            self._cache[cache_key] = stats
+                            self._cache_time[cache_key] = datetime.now()
+                            logger.info(f"Successfully fetched player stats for {player_name}")
+                            return stats
+                        else:
+                            logger.warning(f"Failed to parse player page for {player_name}")
+                            return None
+                    elif response.status == 404:
+                        logger.warning(f"Player {player_name} not found")
+                        return None
+                    else:
+                        logger.error(f"Hoplite Tracker returned status {response.status} for {player_name}")
+                        return None
+
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout while fetching player stats for {player_name}")
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching player stats for {player_name}: {e}")
+            return None
+
+    async def _parse_player_page(self, html: str, player_name: str,
+                                 game_mode: str) -> Optional[Dict[str, Any]]:
+        """
+        Parse player statistics from HTML page
+
+        Args:
+            html: HTML content of the player page
+            player_name: Player name
+            game_mode: Game mode
+
+        Returns:
+            Dictionary with extracted statistics or None
+        """
+        try:
+            soup = BeautifulSoup(html, 'lxml')
+
+            # Extract player data from JSON script tags (Next.js pattern)
+            stats_data = {
+                'player_name': player_name,
+                'game_mode': game_mode,
+                'wins': 0,
+                'kills': 0,
+                'kd_ratio': 0.0,
+                'games_played': 0,
+                'top_kits': [],
+                'statistics': {},
+                'fetched_at': datetime.now().isoformat()
+            }
+
+            # Try to find statistics in script tags
+            scripts = soup.find_all('script', {'type': 'application/json'})
+
+            for script in scripts:
+                try:
+                    data = json.loads(script.string)
+                    # Try to find player statistics in the JSON data
+                    stats_data.update(self._extract_stats_from_json(data, stats_data))
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+
+            # If no data found in JSON, try parsing visible HTML elements
+            if stats_data['wins'] == 0 and stats_data['kills'] == 0:
+                # Look for common patterns in stat displays
+                stat_elements = soup.find_all(['span', 'div', 'p'])
+                for elem in stat_elements:
+                    text = elem.get_text(strip=True)
+                    if 'wins' in text.lower():
+                        stats_data = self._extract_stat_from_text(text, stats_data, 'wins')
+                    elif 'kills' in text.lower():
+                        stats_data = self._extract_stat_from_text(text, stats_data, 'kills')
+                    elif 'kd' in text.lower() or 'k/d' in text.lower():
+                        stats_data = self._extract_stat_from_text(text, stats_data, 'kd_ratio')
+
+            return stats_data if (stats_data['wins'] > 0 or stats_data['kills'] > 0) else None
+
+        except Exception as e:
+            logger.error(f"Error parsing player page: {e}")
+            return None
+
+    def _extract_stats_from_json(self, data: Any, stats_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract statistics from JSON data"""
+        result = {}
+
+        if isinstance(data, dict):
+            # Look for common stat keys
+            for key, value in data.items():
+                if key.lower() in ['wins', 'victories', 'win_count']:
+                    result['wins'] = int(value) if isinstance(value, (int, str)) else 0
+                elif key.lower() in ['kills', 'kill_count', 'total_kills']:
+                    result['kills'] = int(value) if isinstance(value, (int, str)) else 0
+                elif key.lower() in ['kd', 'kd_ratio', 'k_d_ratio']:
+                    try:
+                        result['kd_ratio'] = float(value) if value else 0.0
+                    except (ValueError, TypeError):
+                        result['kd_ratio'] = 0.0
+                elif key.lower() in ['games', 'games_played', 'matches']:
+                    result['games_played'] = int(value) if isinstance(value, (int, str)) else 0
+                elif key.lower() in ['kits', 'top_kits', 'kit_stats']:
+                    if isinstance(value, list):
+                        result['top_kits'] = value[:5]  # Top 5 kits
+
+        return result
+
+    def _extract_stat_from_text(self, text: str, stats_data: Dict[str, Any],
+                                stat_type: str) -> Dict[str, Any]:
+        """Extract statistic from text content"""
+        import re
+
+        # Try to extract numbers from text
+        numbers = re.findall(r'\d+(?:[.,]\d+)?', text)
+
+        if numbers:
+            try:
+                value = numbers[0].replace(',', '')
+                if stat_type == 'wins':
+                    stats_data['wins'] = int(float(value))
+                elif stat_type == 'kills':
+                    stats_data['kills'] = int(float(value))
+                elif stat_type == 'kd_ratio':
+                    stats_data['kd_ratio'] = float(value)
+            except (ValueError, IndexError):
+                pass
+
+        return stats_data
+
+    def _is_cache_valid(self, key: str, max_age_seconds: int = 3600) -> bool:
+        """Check if cached data is still valid (1 hour)"""
+        if key not in self._cache or key not in self._cache_time:
+            return False
+
+        age = (datetime.now() - self._cache_time[key]).total_seconds()
+        return age < max_age_seconds
+
+    def clear_cache(self):
+        """Clear all cached data"""
+        self._cache.clear()
+        self._cache_time.clear()
+
+
 class HopliteCog(commands.Cog):
     """Hoplite status monitoring commands"""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.api = HopliteAPI()
+        self.tracker_api = HopliteTrackerAPI()
         self.db = None
 
         # Start the monitoring task
@@ -280,6 +463,116 @@ class HopliteCog(commands.Cog):
 
         except Exception as e:
             logger.error(f"Error in hoplite components command: {e}")
+            await interaction.followup.send(
+                embed=create_error_embed("An error occurred", str(e)),
+                ephemeral=True
+            )
+
+    @hoplite_group.command(name="player", description="Get player statistics from Hoplite Tracker")
+    @app_commands.describe(
+        player_name="Player's username",
+        game_mode="Game mode (battle-royale or civilization)"
+    )
+    async def hoplite_player(self, interaction: discord.Interaction, player_name: str,
+                             game_mode: str = "battle-royale"):
+        """Get player statistics from Hoplite Tracker"""
+        await interaction.response.defer()
+
+        try:
+            # Validate game mode
+            if game_mode.lower() not in ["battle-royale", "civilization", "br"]:
+                if game_mode.lower() == "br":
+                    game_mode = "battle-royale"
+                else:
+                    game_mode = "battle-royale"  # Default to battle-royale
+
+            logger.info(f"Player stats requested for {player_name} ({game_mode}) by {interaction.user}")
+
+            # Get player stats
+            stats = await self.tracker_api.get_player_stats(player_name, game_mode, use_cache=False)
+
+            if not stats:
+                await interaction.followup.send(
+                    embed=create_error_embed(
+                        "Player not found",
+                        f"Could not find player '{player_name}' on Hoplite Tracker.\n"
+                        f"Please check the spelling and try again."
+                    ),
+                    ephemeral=True
+                )
+                return
+
+            # Create player stats embed
+            embed = discord.Embed(
+                title=f"📊 {stats['player_name']} - Stats",
+                color=discord.Color.blue(),
+                timestamp=discord.utils.utcnow()
+            )
+
+            # Add basic stats
+            embed.add_field(
+                name="Wins",
+                value=f"🏆 {stats['wins']:,}",
+                inline=True
+            )
+
+            embed.add_field(
+                name="Kills",
+                value=f"⚔️ {stats['kills']:,}",
+                inline=True
+            )
+
+            # Calculate K/D ratio
+            kd_ratio = stats.get('kd_ratio', 0.0)
+            if kd_ratio == 0.0 and stats['kills'] > 0 and stats['games_played'] > 0:
+                kd_ratio = stats['kills'] / max(1, stats['games_played'])
+
+            embed.add_field(
+                name="K/D Ratio",
+                value=f"📈 {kd_ratio:.2f}",
+                inline=True
+            )
+
+            # Add games played
+            if stats['games_played'] > 0:
+                embed.add_field(
+                    name="Games Played",
+                    value=f"🎮 {stats['games_played']:,}",
+                    inline=True
+                )
+
+            # Calculate win rate
+            if stats['games_played'] > 0:
+                win_rate = (stats['wins'] / stats['games_played']) * 100
+                embed.add_field(
+                    name="Win Rate",
+                    value=f"📊 {win_rate:.1f}%",
+                    inline=True
+                )
+
+            # Add game mode info
+            mode_display = "Battle Royale" if game_mode == "battle-royale" else "Civilization"
+            embed.add_field(
+                name="Game Mode",
+                value=f"🎯 {mode_display}",
+                inline=True
+            )
+
+            # Add top kits if available
+            if stats.get('top_kits'):
+                kits_text = ", ".join(str(kit) for kit in stats['top_kits'][:5])
+                embed.add_field(
+                    name="Top Kits",
+                    value=kits_text if kits_text else "N/A",
+                    inline=False
+                )
+
+            embed.set_footer(text=f"Data from Hoplite Tracker | Requested by {interaction.user}")
+
+            await interaction.followup.send(embed=embed)
+
+        except Exception as e:
+            logger.error(f"Error in hoplite player command: {e}")
             await interaction.followup.send(
                 embed=create_error_embed("An error occurred", str(e)),
                 ephemeral=True
