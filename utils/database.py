@@ -183,6 +183,21 @@ class Database:
                 )
             ''')
 
+            # Hoplite monitoring table - Track Hoplite status monitoring settings
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS hoplite_monitoring (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT NOT NULL UNIQUE,
+                    channel_id TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    last_status TEXT,
+                    last_incident_ids TEXT DEFAULT '[]',
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE
+                )
+            ''')
+
             # Create indexes for new tables
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_music_history_user
@@ -192,6 +207,11 @@ class Database:
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_user_stats_guild
                 ON user_stats(guild_id, user_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_hoplite_monitoring_guild
+                ON hoplite_monitoring(guild_id)
             ''')
 
             conn.commit()
@@ -1176,6 +1196,164 @@ class Database:
         except sqlite3.Error as e:
             logger.error(f"Error getting genre history: {e}")
             return []
+        finally:
+            conn.close()
+
+    # ==================== HOPLITE MONITORING METHODS ====================
+
+    def setup_hoplite_monitoring(self, guild_id: str, channel_id: str) -> bool:
+        """
+        Enable Hoplite status monitoring for a guild
+
+        Args:
+            guild_id: Discord guild ID
+            channel_id: Discord channel ID for notifications
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO hoplite_monitoring (guild_id, channel_id, enabled)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    channel_id = ?,
+                    enabled = 1,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (guild_id, channel_id, channel_id))
+
+            conn.commit()
+            logger.info(f"Hoplite monitoring enabled for guild {guild_id} in channel {channel_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error setting up Hoplite monitoring: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def disable_hoplite_monitoring(self, guild_id: str) -> bool:
+        """
+        Disable Hoplite status monitoring for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE hoplite_monitoring
+                SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            logger.info(f"Hoplite monitoring disabled for guild {guild_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error disabling Hoplite monitoring: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def get_hoplite_monitoring(self, guild_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get Hoplite monitoring settings for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            Dictionary with monitoring settings or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, channel_id, enabled, last_status, last_incident_ids, created_at, updated_at
+                FROM hoplite_monitoring
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting Hoplite monitoring settings: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_hoplite_monitoring(self) -> List[Dict[str, Any]]:
+        """
+        Get all active Hoplite monitoring configurations
+
+        Returns:
+            List of monitoring configurations where monitoring is enabled
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, channel_id, enabled, last_status, last_incident_ids, created_at, updated_at
+                FROM hoplite_monitoring
+                WHERE enabled = 1
+            ''')
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting all Hoplite monitoring configurations: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def update_hoplite_status(self, guild_id: str, status: str, incident_ids: str) -> bool:
+        """
+        Update last known Hoplite status and incidents for a guild
+
+        Args:
+            guild_id: Discord guild ID
+            status: Current status (UP/DOWN/MAINTENANCE)
+            incident_ids: JSON string of active incident IDs
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE hoplite_monitoring
+                SET last_status = ?, last_incident_ids = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (status, incident_ids, guild_id))
+
+            conn.commit()
+            logger.debug(f"Updated Hoplite status for guild {guild_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error updating Hoplite status: {e}")
+            conn.rollback()
+            return False
         finally:
             conn.close()
 
