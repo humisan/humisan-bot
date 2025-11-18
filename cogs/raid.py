@@ -58,16 +58,26 @@ class RaidAPI:
                 all_towns_detailed = []
                 town_names = [t['name'] for t in town_list]
 
+                logger.info(f"Fetching details for {len(town_names)} towns in batches of {batch_size}")
+
                 for i in range(0, len(town_names), batch_size):
                     batch = town_names[i:i+batch_size]
+                    batch_num = (i // batch_size) + 1
+                    total_batches = (len(town_names) + batch_size - 1) // batch_size
 
-                    async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"query": batch}) as batch_response:
-                        if batch_response.status == 200:
-                            batch_data = await batch_response.json()
-                            if isinstance(batch_data, list):
-                                all_towns_detailed.extend(batch_data)
-                        else:
-                            logger.warning(f"Error fetching batch {i//batch_size}: status {batch_response.status}")
+                    try:
+                        async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"query": batch}) as batch_response:
+                            if batch_response.status == 200:
+                                batch_data = await batch_response.json()
+                                if isinstance(batch_data, list):
+                                    all_towns_detailed.extend(batch_data)
+                                    logger.debug(f"Batch {batch_num}/{total_batches}: Retrieved {len(batch_data)} towns")
+                                else:
+                                    logger.warning(f"Batch {batch_num}/{total_batches}: Unexpected response type: {type(batch_data)}")
+                            else:
+                                logger.warning(f"Batch {batch_num}/{total_batches}: API returned status {batch_response.status}")
+                    except Exception as batch_error:
+                        logger.error(f"Batch {batch_num}/{total_batches}: Error - {batch_error}")
 
                 if all_towns_detailed:
                     self._cache['all_towns'] = all_towns_detailed
@@ -75,7 +85,7 @@ class RaidAPI:
                     logger.info(f"Successfully fetched {len(all_towns_detailed)} towns with timestamps")
                     return all_towns_detailed
                 else:
-                    logger.warning("No town data retrieved")
+                    logger.warning(f"No town data retrieved from API (got {len(town_list)} town names but 0 detailed records)")
                     return None
 
         except asyncio.TimeoutError:
@@ -111,6 +121,71 @@ class RaidAPI:
         )
 
         return ruining_towns[:limit]
+
+    async def get_inactive_mayor_towns(self, towns: List[Dict[str, Any]], days: int = 40, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get towns whose mayors have not logged in for specified days
+
+        Args:
+            towns: List of all towns
+            days: Number of days for inactivity threshold
+            limit: Maximum number of towns to return
+
+        Returns:
+            List of towns with inactive mayors
+        """
+        from time import time
+
+        inactive_towns = []
+        current_time_ms = int(time() * 1000)  # Current time in milliseconds
+        inactivity_threshold_ms = days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
+
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                for town in towns:
+                    try:
+                        mayor_info = town.get('mayor', {})
+                        if not mayor_info or not isinstance(mayor_info, dict):
+                            continue
+
+                        mayor_name = mayor_info.get('name')
+                        if not mayor_name:
+                            continue
+
+                        # Fetch player data to get last online timestamp
+                        players_endpoint = f"{self.base_url}/players"
+                        async with session.post(players_endpoint, json={"query": [mayor_name]}) as response:
+                            if response.status == 200:
+                                player_data = await response.json()
+                                if isinstance(player_data, list) and len(player_data) > 0:
+                                    player = player_data[0]
+                                    last_online = player.get('timestamps', {}).get('lastOnline')
+
+                                    if last_online:
+                                        # Convert to milliseconds if needed
+                                        if last_online < 10000000000:
+                                            last_online = last_online * 1000
+
+                                        time_inactive = current_time_ms - last_online
+
+                                        if time_inactive >= inactivity_threshold_ms:
+                                            # Add inactive days info to town data
+                                            town_copy = town.copy()
+                                            town_copy['mayor_inactive_days'] = time_inactive // (24 * 60 * 60 * 1000)
+                                            inactive_towns.append(town_copy)
+
+                    except Exception as e:
+                        logger.debug(f"Error checking mayor for town {town.get('name')}: {e}")
+                        continue
+
+                # Sort by inactivity days (most inactive first)
+                inactive_towns.sort(key=lambda t: t.get('mayor_inactive_days', 0), reverse=True)
+                logger.info(f"Found {len(inactive_towns)} towns with inactive mayors ({days}+ days)")
+                return inactive_towns[:limit]
+
+        except Exception as e:
+            logger.error(f"Error fetching inactive mayor towns: {e}")
+            return []
 
     def _is_cache_valid(self, key: str, max_age_seconds: int = 300) -> bool:
         """Check if cached data is still valid (5 minutes default)"""
@@ -152,13 +227,16 @@ class RaidCog(commands.Cog):
     # ==================== SLASH COMMANDS ====================
 
     @app_commands.command(name="raid", description="次に崩壊するタウンを表示")
-    @app_commands.describe(limit="表示するタウン数 (デフォルト: 20)")
-    async def raid(self, interaction: discord.Interaction, limit: int = 20):
-        """Display towns about to ruin"""
+    @app_commands.describe(
+        limit="表示するタウン数 (デフォルト: 20)",
+        mode="表示モード: ruining=崩壊予定, inactive-mayor=市長が非アクティブ"
+    )
+    async def raid(self, interaction: discord.Interaction, limit: int = 20, mode: str = "ruining"):
+        """Display towns - can show either ruining or inactive mayor towns"""
         await interaction.response.defer()
 
         try:
-            logger.info(f"Raid info requested by {interaction.user}")
+            logger.info(f"Raid info requested by {interaction.user} (mode: {mode})")
 
             # Get all towns
             towns = await self.api.get_all_towns(use_cache=False)
@@ -173,14 +251,30 @@ class RaidCog(commands.Cog):
                 )
                 return
 
-            # Get ruining towns
-            ruining_towns = self.api.get_ruining_towns(towns, limit=limit)
+            # Get towns based on mode
+            if mode.lower() == "inactive-mayor":
+                await interaction.followup.send(
+                    content="⏳ 市長が非アクティブなタウンを取得中... (数分かかることがあります)",
+                    ephemeral=True
+                )
+                towns_to_display = await self.api.get_inactive_mayor_towns(towns, days=40, limit=limit)
+                title = "👻 市長が非アクティブなタウン (40日以上ログインなし)"
+                empty_message = "市長が40日以上ログインしていないタウンはありません。"
+                data_key = "mayor_inactive_days"
+                date_label = "市長が非アクティブな日数"
+            else:
+                # Default to ruining
+                towns_to_display = self.api.get_ruining_towns(towns, limit=limit)
+                title = "⚔️ 崩壊予定タウン"
+                empty_message = "現在、崩壊予定のタウンはありません。"
+                data_key = "ruinedAt"
+                date_label = "崩壊予定日"
 
-            if not ruining_towns:
+            if not towns_to_display:
                 await interaction.followup.send(
                     embed=create_error_embed(
-                        "予定中のタウンなし",
-                        "現在、崩壊予定のタウンはありません。"
+                        "該当するタウンなし",
+                        empty_message
                     ),
                     ephemeral=True
                 )
@@ -188,7 +282,7 @@ class RaidCog(commands.Cog):
 
             # Create embed
             embed = discord.Embed(
-                title="⚔️ 崩壊予定タウン",
+                title=title,
                 color=discord.Color.red(),
                 timestamp=discord.utils.utcnow()
             )
@@ -209,8 +303,8 @@ class RaidCog(commands.Cog):
 
             # Split towns into chunks to avoid embed limits
             chunk_size = 10
-            for i in range(0, len(ruining_towns), chunk_size):
-                chunk = ruining_towns[i:i+chunk_size]
+            for i in range(0, len(towns_to_display), chunk_size):
+                chunk = towns_to_display[i:i+chunk_size]
                 towns_text = ""
 
                 for town in chunk:
@@ -219,14 +313,20 @@ class RaidCog(commands.Cog):
                     nation_name = nation_info.get('name', '独立') if isinstance(nation_info, dict) else nation_info or '独立'
                     mayor = town.get('mayor', {})
                     mayor_name = mayor.get('name', 'Unknown') if isinstance(mayor, dict) else mayor
-                    ruin_date = town.get('timestamps', {}).get('ruinedAt')
-                    ruin_date_str = format_timestamp(ruin_date) if ruin_date else "不明"
 
                     towns_text += f"**{town_name}** (`{nation_name}`)\n"
                     towns_text += f"  市長: `{mayor_name}`\n"
-                    towns_text += f"  崩壊予定: `{ruin_date_str}`\n\n"
 
-                field_name = f"🏴 タウン ({i+1}-{min(i+chunk_size, len(ruining_towns))})"
+                    # Display different information based on mode
+                    if mode.lower() == "inactive-mayor":
+                        inactive_days = town.get('mayor_inactive_days', 0)
+                        towns_text += f"  非アクティブ日数: `{inactive_days}日`\n\n"
+                    else:
+                        ruin_date = town.get('timestamps', {}).get('ruinedAt')
+                        ruin_date_str = format_timestamp(ruin_date) if ruin_date else "不明"
+                        towns_text += f"  崩壊予定: `{ruin_date_str}`\n\n"
+
+                field_name = f"🏴 タウン ({i+1}-{min(i+chunk_size, len(towns_to_display))})"
                 embed.add_field(name=field_name, value=towns_text.rstrip("\n"), inline=False)
 
             embed.set_footer(text="EarthMC Aurora サーバー")
