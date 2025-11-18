@@ -83,13 +83,19 @@ class EarthMCAPI:
 
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"name": town_name}) as response:
+                async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"query": [town_name]}) as response:
                     if response.status == 200:
                         data = await response.json()
-                        self._cache[cache_key] = data
-                        self._cache_time[cache_key] = datetime.now()
-                        logger.info(f"Successfully fetched town data for {town_name}")
-                        return data
+                        # API returns an array of matches, take the first result
+                        if isinstance(data, list) and len(data) > 0:
+                            town_info = data[0]
+                            self._cache[cache_key] = town_info
+                            self._cache_time[cache_key] = datetime.now()
+                            logger.info(f"Successfully fetched town data for {town_name}")
+                            return town_info
+                        else:
+                            logger.warning(f"Town '{town_name}' not found")
+                            return None
                     elif response.status == 404:
                         logger.warning(f"Town '{town_name}' not found")
                         return None
@@ -123,13 +129,19 @@ class EarthMCAPI:
 
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(EARTHMC_NATIONS_ENDPOINT, json={"name": nation_name}) as response:
+                async with session.post(EARTHMC_NATIONS_ENDPOINT, json={"query": [nation_name]}) as response:
                     if response.status == 200:
                         data = await response.json()
-                        self._cache[cache_key] = data
-                        self._cache_time[cache_key] = datetime.now()
-                        logger.info(f"Successfully fetched nation data for {nation_name}")
-                        return data
+                        # API returns an array of matches, take the first result
+                        if isinstance(data, list) and len(data) > 0:
+                            nation_info = data[0]
+                            self._cache[cache_key] = nation_info
+                            self._cache_time[cache_key] = datetime.now()
+                            logger.info(f"Successfully fetched nation data for {nation_name}")
+                            return nation_info
+                        else:
+                            logger.warning(f"Nation '{nation_name}' not found")
+                            return None
                     elif response.status == 404:
                         logger.warning(f"Nation '{nation_name}' not found")
                         return None
@@ -163,13 +175,19 @@ class EarthMCAPI:
 
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(EARTHMC_PLAYERS_ENDPOINT, json={"name": player_name}) as response:
+                async with session.post(EARTHMC_PLAYERS_ENDPOINT, json={"query": [player_name]}) as response:
                     if response.status == 200:
                         data = await response.json()
-                        self._cache[cache_key] = data
-                        self._cache_time[cache_key] = datetime.now()
-                        logger.info(f"Successfully fetched player data for {player_name}")
-                        return data
+                        # API returns an array of matches, take the first result
+                        if isinstance(data, list) and len(data) > 0:
+                            player_info = data[0]
+                            self._cache[cache_key] = player_info
+                            self._cache_time[cache_key] = datetime.now()
+                            logger.info(f"Successfully fetched player data for {player_name}")
+                            return player_info
+                        else:
+                            logger.warning(f"Player '{player_name}' not found")
+                            return None
                     elif response.status == 404:
                         logger.warning(f"Player '{player_name}' not found")
                         return None
