@@ -11,6 +11,24 @@ from utils.helpers import create_error_embed, create_success_embed
 
 logger = setup_logger(__name__)
 
+
+def format_timestamp(timestamp) -> str:
+    """Convert Unix timestamp (milliseconds or seconds) to readable format"""
+    try:
+        # Handle both milliseconds and seconds
+        if isinstance(timestamp, (int, float)):
+            # If timestamp is very large, it's likely in milliseconds
+            if timestamp > 10000000000:
+                timestamp = timestamp / 1000
+            dt = datetime.fromtimestamp(timestamp)
+            return dt.strftime("%Y年%m月%d日 %H:%M:%S")
+        else:
+            # String timestamp, return as is
+            return str(timestamp)
+    except Exception as e:
+        logger.warning(f"Failed to convert timestamp {timestamp}: {e}")
+        return str(timestamp)
+
 # EarthMC API configuration
 EARTHMC_API_BASE = "https://api.earthmc.net/v3/aurora"
 EARTHMC_SERVER_ENDPOINT = f"{EARTHMC_API_BASE}/server"
@@ -272,44 +290,44 @@ class EarthMCCog(commands.Cog):
 
             # UUID
             if 'uuid' in town_data:
-                embed.add_field(name="UUID", value=town_data['uuid'], inline=True)
+                embed.add_field(name="UUID", value=f"`{town_data['uuid']}`", inline=True)
 
             # Mayor
             if 'mayor' in town_data:
                 mayor = town_data['mayor']
                 if isinstance(mayor, dict):
-                    embed.add_field(name="市長", value=f"👤 {mayor.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="市長", value=f"👤 **{mayor.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="市長", value=f"👤 {mayor}", inline=True)
+                    embed.add_field(name="市長", value=f"👤 **{mayor}**", inline=True)
 
             # Founder
             if 'founder' in town_data:
-                embed.add_field(name="創設者", value=f"🏗️ {town_data['founder']}", inline=True)
+                embed.add_field(name="創設者", value=f"🏗️ **{town_data['founder']}**", inline=True)
 
             # Nation
             if 'nation' in town_data and town_data['nation']:
                 nation = town_data['nation']
                 if isinstance(nation, dict):
-                    embed.add_field(name="国家", value=f"🏰 {nation.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="国家", value=f"🏰 **{nation.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="国家", value=f"🏰 {nation}", inline=True)
+                    embed.add_field(name="国家", value=f"🏰 **{nation}**", inline=True)
 
             # Status fields
             if 'status' in town_data:
                 status = town_data['status']
                 status_str = ""
                 if status.get('isPublic'):
-                    status_str += "🔓 公開 | "
+                    status_str += "🔓 **公開** | "
                 else:
-                    status_str += "🔒 非公開 | "
+                    status_str += "🔒 **非公開** | "
                 if status.get('isOpen'):
-                    status_str += "✅ 参加可能 | "
+                    status_str += "✅ **参加可能** | "
                 else:
-                    status_str += "❌ 参加不可 | "
+                    status_str += "❌ **参加不可** | "
                 if status.get('isCapital'):
-                    status_str += "👑 首都"
+                    status_str += "👑 **首都**"
                 if status.get('isRuined'):
-                    status_str += "💔 廃墟"
+                    status_str += "💔 **廃墟**"
                 if status_str:
                     embed.add_field(name="ステータス", value=status_str.rstrip(" | "), inline=False)
 
@@ -317,33 +335,37 @@ class EarthMCCog(commands.Cog):
             if 'timestamps' in town_data:
                 timestamps = town_data['timestamps']
                 if timestamps.get('registered'):
-                    embed.add_field(name="建設日", value=timestamps['registered'], inline=True)
+                    embed.add_field(name="建設日", value=f"`{format_timestamp(timestamps['registered'])}`", inline=True)
                 if timestamps.get('joinedNationAt'):
-                    embed.add_field(name="国家参加日", value=timestamps['joinedNationAt'], inline=True)
+                    embed.add_field(name="国家参加日", value=f"`{format_timestamp(timestamps['joinedNationAt'])}`", inline=True)
 
             # Stats
             if 'stats' in town_data:
                 stats = town_data['stats']
+                stats_text = ""
                 if 'numResidents' in stats:
-                    embed.add_field(name="住民数", value=f"👥 {stats['numResidents']}", inline=True)
+                    stats_text += f"👥 **住民数:** `{stats['numResidents']}`\n"
                 if 'numTownBlocks' in stats:
-                    embed.add_field(name="タウンブロック数", value=f"📦 {stats['numTownBlocks']}/{stats.get('maxTownBlocks', 'Unknown')}", inline=True)
+                    max_blocks = stats.get('maxTownBlocks', 'Unknown')
+                    stats_text += f"📦 **タウンブロック:** `{stats['numTownBlocks']}/{max_blocks}`\n"
                 if 'numTrusted' in stats:
-                    embed.add_field(name="信頼メンバー", value=f"🤝 {stats['numTrusted']}", inline=True)
+                    stats_text += f"🤝 **信頼メンバー:** `{stats['numTrusted']}`\n"
                 if 'numOutlaws' in stats:
-                    embed.add_field(name="アウトロー", value=f"⚠️ {stats['numOutlaws']}", inline=True)
+                    stats_text += f"⚠️ **アウトロー:** `{stats['numOutlaws']}`\n"
                 if 'balance' in stats:
-                    embed.add_field(name="資金", value=f"💰 ${stats['balance']}", inline=True)
+                    stats_text += f"💰 **資金:** `${stats['balance']}`\n"
                 if 'forSalePrice' in stats and stats['forSalePrice']:
-                    embed.add_field(name="販売価格", value=f"💵 ${stats['forSalePrice']}", inline=True)
+                    stats_text += f"💵 **販売価格:** `${stats['forSalePrice']}`"
+                if stats_text:
+                    embed.add_field(name="**統計情報**", value=stats_text.rstrip("\n"), inline=False)
 
             # Board
             if 'board' in town_data and town_data['board']:
-                embed.add_field(name="お知らせ", value=town_data['board'][:1024], inline=False)
+                embed.add_field(name="📰 **お知らせ**", value=f"```\n{town_data['board'][:1024]}\n```", inline=False)
 
             # Wiki
             if 'wiki' in town_data and town_data['wiki']:
-                embed.add_field(name="Wiki", value=town_data['wiki'][:1024], inline=False)
+                embed.add_field(name="📖 **Wiki**", value=f"[リンク]({town_data['wiki']})", inline=False)
 
             # Residents list (limited to avoid embed size limits)
             if 'residents' in town_data:
@@ -417,36 +439,36 @@ class EarthMCCog(commands.Cog):
 
             # UUID
             if 'uuid' in nation_data:
-                embed.add_field(name="UUID", value=nation_data['uuid'], inline=True)
+                embed.add_field(name="UUID", value=f"`{nation_data['uuid']}`", inline=True)
 
             # King
             if 'king' in nation_data:
                 king = nation_data['king']
                 if isinstance(king, dict):
-                    embed.add_field(name="国王", value=f"👑 {king.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="国王", value=f"👑 **{king.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="国王", value=f"👑 {king}", inline=True)
+                    embed.add_field(name="国王", value=f"👑 **{king}**", inline=True)
 
             # Capital
             if 'capital' in nation_data:
                 capital = nation_data['capital']
                 if isinstance(capital, dict):
-                    embed.add_field(name="首都", value=f"🏛️ {capital.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="首都", value=f"🏛️ **{capital.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="首都", value=f"🏛️ {capital}", inline=True)
+                    embed.add_field(name="首都", value=f"🏛️ **{capital}**", inline=True)
 
             # Status fields
             if 'status' in nation_data:
                 status = nation_data['status']
                 status_str = ""
                 if status.get('isPublic'):
-                    status_str += "🔓 公開 | "
+                    status_str += "🔓 **公開** | "
                 else:
-                    status_str += "🔒 非公開 | "
+                    status_str += "🔒 **非公開** | "
                 if status.get('isOpen'):
-                    status_str += "✅ 参加可能"
+                    status_str += "✅ **参加可能**"
                 else:
-                    status_str += "❌ 参加不可"
+                    status_str += "❌ **参加不可**"
                 if status_str:
                     embed.add_field(name="ステータス", value=status_str.rstrip(" | "), inline=False)
 
@@ -454,31 +476,34 @@ class EarthMCCog(commands.Cog):
             if 'timestamps' in nation_data:
                 timestamps = nation_data['timestamps']
                 if timestamps.get('registered'):
-                    embed.add_field(name="建国日", value=timestamps['registered'], inline=True)
+                    embed.add_field(name="建国日", value=f"`{format_timestamp(timestamps['registered'])}`", inline=True)
 
             # Stats
             if 'stats' in nation_data:
                 stats = nation_data['stats']
+                stats_text = ""
                 if 'numResidents' in stats:
-                    embed.add_field(name="国民数", value=f"👥 {stats['numResidents']}", inline=True)
+                    stats_text += f"👥 **国民数:** `{stats['numResidents']}`\n"
                 if 'numTowns' in stats:
-                    embed.add_field(name="タウン数", value=f"🏘️ {stats['numTowns']}", inline=True)
+                    stats_text += f"🏘️ **タウン数:** `{stats['numTowns']}`\n"
                 if 'numTownBlocks' in stats:
-                    embed.add_field(name="タウンブロック数", value=f"📦 {stats['numTownBlocks']}", inline=True)
+                    stats_text += f"📦 **タウンブロック数:** `{stats['numTownBlocks']}`\n"
                 if 'numAllies' in stats:
-                    embed.add_field(name="同盟国", value=f"🤝 {stats['numAllies']}", inline=True)
+                    stats_text += f"🤝 **同盟国:** `{stats['numAllies']}`\n"
                 if 'numEnemies' in stats:
-                    embed.add_field(name="敵国", value=f"⚔️ {stats['numEnemies']}", inline=True)
+                    stats_text += f"⚔️ **敵国:** `{stats['numEnemies']}`\n"
                 if 'balance' in stats:
-                    embed.add_field(name="資金", value=f"💰 ${stats['balance']}", inline=True)
+                    stats_text += f"💰 **資金:** `${stats['balance']}`"
+                if stats_text:
+                    embed.add_field(name="**統計情報**", value=stats_text.rstrip("\n"), inline=False)
 
             # Board
             if 'board' in nation_data and nation_data['board']:
-                embed.add_field(name="お知らせ", value=nation_data['board'][:1024], inline=False)
+                embed.add_field(name="📰 **お知らせ**", value=f"```\n{nation_data['board'][:1024]}\n```", inline=False)
 
             # Wiki
             if 'wiki' in nation_data and nation_data['wiki']:
-                embed.add_field(name="Wiki", value=nation_data['wiki'][:1024], inline=False)
+                embed.add_field(name="📖 **Wiki**", value=f"[リンク]({nation_data['wiki']})", inline=False)
 
             # Residents list (limited)
             if 'residents' in nation_data:
@@ -562,32 +587,32 @@ class EarthMCCog(commands.Cog):
 
             # UUID
             if 'uuid' in player_data:
-                embed.add_field(name="UUID", value=player_data['uuid'], inline=True)
+                embed.add_field(name="UUID", value=f"`{player_data['uuid']}`", inline=True)
 
             # Title and Surname
             if 'title' in player_data and player_data['title']:
-                embed.add_field(name="タイトル", value=player_data['title'], inline=True)
+                embed.add_field(name="タイトル", value=f"**{player_data['title']}**", inline=True)
             if 'surname' in player_data and player_data['surname']:
-                embed.add_field(name="姓氏", value=player_data['surname'], inline=True)
+                embed.add_field(name="姓氏", value=f"**{player_data['surname']}**", inline=True)
 
             # About
             if 'about' in player_data and player_data['about']:
-                embed.add_field(name="自己紹介", value=player_data['about'][:1024], inline=False)
+                embed.add_field(name="📝 **自己紹介**", value=f"```\n{player_data['about'][:1024]}\n```", inline=False)
 
             # Status
             if 'status' in player_data:
                 status = player_data['status']
                 status_str = ""
                 if status.get('isOnline'):
-                    status_str += "🟢 オンライン"
+                    status_str += "🟢 **オンライン**"
                 else:
-                    status_str += "⚫ オフライン"
+                    status_str += "⚫ **オフライン**"
                 if status.get('isNPC'):
-                    status_str += " | 🤖 NPC"
+                    status_str += " | 🤖 **NPC**"
                 if status.get('isMayor'):
-                    status_str += " | 🏛️ 市長"
+                    status_str += " | 🏛️ **市長**"
                 if status.get('isKing'):
-                    status_str += " | 👑 国王"
+                    status_str += " | 👑 **国王**"
                 if status_str:
                     embed.add_field(name="ステータス", value=status_str, inline=False)
 
@@ -595,35 +620,41 @@ class EarthMCCog(commands.Cog):
             if 'town' in player_data and player_data['town']:
                 town = player_data['town']
                 if isinstance(town, dict):
-                    embed.add_field(name="所属タウン", value=f"🏛️ {town.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="所属タウン", value=f"🏛️ **{town.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="所属タウン", value=f"🏛️ {town}", inline=True)
+                    embed.add_field(name="所属タウン", value=f"🏛️ **{town}**", inline=True)
 
             # Nation
             if 'nation' in player_data and player_data['nation']:
                 nation = player_data['nation']
                 if isinstance(nation, dict):
-                    embed.add_field(name="所属国家", value=f"🏰 {nation.get('name', 'Unknown')}", inline=True)
+                    embed.add_field(name="所属国家", value=f"🏰 **{nation.get('name', 'Unknown')}**", inline=True)
                 else:
-                    embed.add_field(name="所属国家", value=f"🏰 {nation}", inline=True)
+                    embed.add_field(name="所属国家", value=f"🏰 **{nation}**", inline=True)
 
             # Timestamps
             if 'timestamps' in player_data:
                 timestamps = player_data['timestamps']
+                dates_text = ""
                 if timestamps.get('registered'):
-                    embed.add_field(name="アカウント作成日", value=timestamps['registered'], inline=True)
+                    dates_text += f"📅 **作成日:** `{format_timestamp(timestamps['registered'])}`\n"
                 if timestamps.get('joinedTownAt'):
-                    embed.add_field(name="タウン参加日", value=timestamps['joinedTownAt'], inline=True)
+                    dates_text += f"🏘️ **参加日:** `{format_timestamp(timestamps['joinedTownAt'])}`\n"
                 if timestamps.get('lastOnline'):
-                    embed.add_field(name="最後にオンライン", value=timestamps['lastOnline'], inline=True)
+                    dates_text += f"⏰ **最終ログイン:** `{format_timestamp(timestamps['lastOnline'])}`"
+                if dates_text:
+                    embed.add_field(name="**日付情報**", value=dates_text.rstrip("\n"), inline=False)
 
             # Stats
             if 'stats' in player_data:
                 stats = player_data['stats']
+                stats_text = ""
                 if 'balance' in stats:
-                    embed.add_field(name="資金", value=f"💰 ${stats['balance']}", inline=True)
+                    stats_text += f"💰 **資金:** `${stats['balance']}`\n"
                 if 'numFriends' in stats:
-                    embed.add_field(name="フレンド数", value=f"🤝 {stats['numFriends']}", inline=True)
+                    stats_text += f"🤝 **フレンド数:** `{stats['numFriends']}`"
+                if stats_text:
+                    embed.add_field(name="**統計情報**", value=stats_text.rstrip("\n"), inline=False)
 
             # Ranks
             if 'ranks' in player_data:
@@ -633,28 +664,28 @@ class EarthMCCog(commands.Cog):
                     if 'townRanks' in ranks and ranks['townRanks']:
                         town_ranks = ranks['townRanks']
                         if isinstance(town_ranks, list):
-                            rank_text += f"タウンランク: {', '.join(town_ranks)}"
+                            rank_text += f"🏛️ **タウンランク:** `{', '.join(town_ranks)}`"
                     if 'nationRanks' in ranks and ranks['nationRanks']:
                         nation_ranks = ranks['nationRanks']
                         if isinstance(nation_ranks, list):
                             if rank_text:
                                 rank_text += "\n"
-                            rank_text += f"国家ランク: {', '.join(nation_ranks)}"
+                            rank_text += f"🏰 **国家ランク:** `{', '.join(nation_ranks)}`"
                 elif isinstance(ranks, list) and ranks:
-                    rank_text = ", ".join(ranks)
+                    rank_text = f"`{', '.join(ranks)}`"
 
                 if rank_text:
-                    embed.add_field(name="ランク", value=rank_text, inline=False)
+                    embed.add_field(name="**ランク**", value=rank_text, inline=False)
 
             # Friends list (limited)
             if 'friends' in player_data:
                 friends = player_data['friends']
                 if isinstance(friends, list) and friends:
                     friend_names = [f.get('name', 'Unknown') if isinstance(f, dict) else f for f in friends[:5]]
-                    friend_text = ", ".join(friend_names)
+                    friend_text = "`" + "`, `".join(friend_names) + "`"
                     if len(friends) > 5:
                         friend_text += f" +{len(friends) - 5}人"
-                    embed.add_field(name="フレンド (最初5人)", value=friend_text, inline=False)
+                    embed.add_field(name="👥 **フレンド (最初5人)**", value=friend_text, inline=False)
 
             embed.set_footer(text="EarthMC Aurora サーバー")
 
@@ -702,8 +733,8 @@ class EarthMCCog(commands.Cog):
                 progress = (current / target * 100) if target > 0 else 0
 
                 embed.add_field(
-                    name="投票進捗",
-                    value=f"{current}/{target} ({progress:.1f}%)",
+                    name="**投票進捗**",
+                    value=f"`{current}` / `{target}` (**{progress:.1f}%**)",
                     inline=False
                 )
 
@@ -712,15 +743,15 @@ class EarthMCCog(commands.Cog):
                 filled = int(bar_length * current / target) if target > 0 else 0
                 bar = "█" * filled + "░" * (bar_length - filled)
                 embed.add_field(
-                    name="進捗バー",
-                    value=f"`{bar}`",
+                    name="**進捗バー**",
+                    value=f"```\n{bar}\n```",
                     inline=False
                 )
 
             if 'reward' in vote_party:
                 embed.add_field(
-                    name="報酬",
-                    value=f"🎁 {vote_party['reward']}",
+                    name="**報酬**",
+                    value=f"🎁 **{vote_party['reward']}**",
                     inline=False
                 )
 
@@ -894,8 +925,8 @@ class EarthMCCog(commands.Cog):
                 progress = (current / target * 100) if target > 0 else 0
 
                 embed.add_field(
-                    name="投票数",
-                    value=f"{current}/{target} ({progress:.1f}%)",
+                    name="**投票数**",
+                    value=f"`{current}` / `{target}` (**{progress:.1f}%**)",
                     inline=False
                 )
 
@@ -904,15 +935,15 @@ class EarthMCCog(commands.Cog):
                 filled = int(bar_length * current / target) if target > 0 else 0
                 bar = "█" * filled + "░" * (bar_length - filled)
                 embed.add_field(
-                    name="進捗",
-                    value=f"`{bar}`",
+                    name="**進捗**",
+                    value=f"```\n{bar}\n```",
                     inline=False
                 )
 
             if 'reward' in vote_party:
                 embed.add_field(
-                    name="報酬",
-                    value=f"🎁 {vote_party['reward']}",
+                    name="**報酬**",
+                    value=f"🎁 **{vote_party['reward']}**",
                     inline=False
                 )
 
