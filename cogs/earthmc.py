@@ -223,11 +223,9 @@ class EarthMCCog(commands.Cog):
 
     # ==================== SLASH COMMANDS ====================
 
-    earthmc_group = app_commands.Group(name="earthmc", description="EarthMCサーバーの情報を確認")
-
-    @earthmc_group.command(name="town", description="タウン情報を表示")
+    @app_commands.command(name="town", description="タウン情報を表示")
     @app_commands.describe(name="タウン名")
-    async def earthmc_town(self, interaction: discord.Interaction, name: str):
+    async def town(self, interaction: discord.Interaction, name: str):
         """Display town information"""
         await interaction.response.defer()
 
@@ -370,9 +368,9 @@ class EarthMCCog(commands.Cog):
                 ephemeral=True
             )
 
-    @earthmc_group.command(name="nation", description="国家情報を表示")
+    @app_commands.command(name="nation", description="国家情報を表示")
     @app_commands.describe(name="国家名")
-    async def earthmc_nation(self, interaction: discord.Interaction, name: str):
+    async def nation(self, interaction: discord.Interaction, name: str):
         """Display nation information"""
         await interaction.response.defer()
 
@@ -515,9 +513,9 @@ class EarthMCCog(commands.Cog):
                 ephemeral=True
             )
 
-    @earthmc_group.command(name="res", description="プレイヤー/レジデンス情報を表示")
+    @app_commands.command(name="resident", description="プレイヤー情報を表示")
     @app_commands.describe(name="プレイヤー名")
-    async def earthmc_residence(self, interaction: discord.Interaction, name: str):
+    async def resident(self, interaction: discord.Interaction, name: str):
         """Display player residence information"""
         await interaction.response.defer()
 
@@ -651,8 +649,8 @@ class EarthMCCog(commands.Cog):
                 ephemeral=True
             )
 
-    @earthmc_group.command(name="voteparty", description="Vote Party の情報を表示")
-    async def earthmc_voteparty(self, interaction: discord.Interaction):
+    @app_commands.command(name="voteparty", description="Vote Party の情報を表示")
+    async def voteparty(self, interaction: discord.Interaction):
         """Display Vote Party information"""
         await interaction.response.defer()
 
@@ -719,9 +717,7 @@ class EarthMCCog(commands.Cog):
                 ephemeral=True
             )
 
-    voteparty_group = app_commands.Group(name="voteparty-notify", description="Vote Party 通知を管理")
-
-    @voteparty_group.command(name="enable", description="このチャネルで30分ごとの Vote Party 通知を有効化")
+    @app_commands.command(name="voteparty-enable", description="30分ごとの Vote Party 通知を有効化")
     @app_commands.describe(channel="通知を送信するチャネル")
     async def voteparty_enable(self, interaction: discord.Interaction, channel: discord.TextChannel):
         """Enable Vote Party notifications"""
@@ -775,7 +771,7 @@ class EarthMCCog(commands.Cog):
                 ephemeral=True
             )
 
-    @voteparty_group.command(name="disable", description="Vote Party 通知を無効化")
+    @app_commands.command(name="voteparty-disable", description="Vote Party 通知を無効化")
     async def voteparty_disable(self, interaction: discord.Interaction):
         """Disable Vote Party notifications"""
         if self.db is None:
@@ -917,8 +913,4 @@ async def setup(bot: commands.Bot):
     """Load the EarthMC cog"""
     cog = EarthMCCog(bot)
     await bot.add_cog(cog)
-
-    # Register command groups with the bot
-    bot.tree.add_command(cog.earthmc_group)
-
     logger.info("EarthMC cog loaded successfully")
