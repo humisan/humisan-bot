@@ -141,42 +141,70 @@ class RaidAPI:
         inactivity_threshold_ms = days * 24 * 60 * 60 * 1000  # Convert days to milliseconds
 
         try:
+            # Step 1: Extract unique mayor names from all towns
+            mayor_names = set()
+            town_by_mayor = {}  # Map mayor name to towns
+
+            for town in towns:
+                mayor_info = town.get('mayor', {})
+                if not mayor_info or not isinstance(mayor_info, dict):
+                    continue
+
+                mayor_name = mayor_info.get('name')
+                if not mayor_name:
+                    continue
+
+                mayor_names.add(mayor_name)
+                if mayor_name not in town_by_mayor:
+                    town_by_mayor[mayor_name] = []
+                town_by_mayor[mayor_name].append(town)
+
+            logger.info(f"Found {len(mayor_names)} unique mayors to check for inactivity")
+
+            # Step 2: Fetch mayor data in batches
+            mayors_data = {}  # Map mayor name to player data
+            batch_size = 100
+            mayors_list = list(mayor_names)
+            players_endpoint = f"{self.base_url}/players"
+
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                for town in towns:
+                for i in range(0, len(mayors_list), batch_size):
+                    batch = mayors_list[i:i+batch_size]
+                    batch_num = (i // batch_size) + 1
+                    total_batches = (len(mayors_list) + batch_size - 1) // batch_size
+
                     try:
-                        mayor_info = town.get('mayor', {})
-                        if not mayor_info or not isinstance(mayor_info, dict):
-                            continue
-
-                        mayor_name = mayor_info.get('name')
-                        if not mayor_name:
-                            continue
-
-                        # Fetch player data to get last online timestamp
-                        players_endpoint = f"{self.base_url}/players"
-                        async with session.post(players_endpoint, json={"query": [mayor_name]}) as response:
+                        async with session.post(players_endpoint, json={"query": batch}) as response:
                             if response.status == 200:
                                 player_data = await response.json()
-                                if isinstance(player_data, list) and len(player_data) > 0:
-                                    player = player_data[0]
-                                    last_online = player.get('timestamps', {}).get('lastOnline')
+                                if isinstance(player_data, list):
+                                    for player in player_data:
+                                        player_name = player.get('name')
+                                        if player_name:
+                                            mayors_data[player_name] = player
+                                    logger.debug(f"Batch {batch_num}/{total_batches}: Retrieved {len(player_data)} mayors")
+                            else:
+                                logger.warning(f"Batch {batch_num}/{total_batches}: API returned status {response.status}")
+                    except Exception as batch_error:
+                        logger.error(f"Batch {batch_num}/{total_batches}: Error - {batch_error}")
 
-                                    if last_online:
-                                        # Convert to milliseconds if needed
-                                        if last_online < 10000000000:
-                                            last_online = last_online * 1000
+                # Step 3: Check inactivity for each mayor's towns
+                for mayor_name, mayor_data in mayors_data.items():
+                    last_online = mayor_data.get('timestamps', {}).get('lastOnline')
 
-                                        time_inactive = current_time_ms - last_online
+                    if last_online:
+                        # Convert to milliseconds if needed
+                        if last_online < 10000000000:
+                            last_online = last_online * 1000
 
-                                        if time_inactive >= inactivity_threshold_ms:
-                                            # Add inactive days info to town data
-                                            town_copy = town.copy()
-                                            town_copy['mayor_inactive_days'] = time_inactive // (24 * 60 * 60 * 1000)
-                                            inactive_towns.append(town_copy)
+                        time_inactive = current_time_ms - last_online
 
-                    except Exception as e:
-                        logger.debug(f"Error checking mayor for town {town.get('name')}: {e}")
-                        continue
+                        if time_inactive >= inactivity_threshold_ms:
+                            # Add all towns of this mayor to inactive list
+                            for town in town_by_mayor.get(mayor_name, []):
+                                town_copy = town.copy()
+                                town_copy['mayor_inactive_days'] = time_inactive // (24 * 60 * 60 * 1000)
+                                inactive_towns.append(town_copy)
 
                 # Sort by inactivity days (most inactive first)
                 inactive_towns.sort(key=lambda t: t.get('mayor_inactive_days', 0), reverse=True)
@@ -226,13 +254,13 @@ class RaidCog(commands.Cog):
 
     # ==================== SLASH COMMANDS ====================
 
-    @app_commands.command(name="raid", description="次に崩壊するタウンを表示")
+    @app_commands.command(name="raid", description="市長が非アクティブなタウン（ruins予定）を表示")
     @app_commands.describe(
         limit="表示するタウン数 (デフォルト: 20)",
-        mode="表示モード: ruining=崩壊予定, inactive-mayor=市長が非アクティブ"
+        mode="表示モード: inactive-mayor=市長が非アクティブ (デフォルト), ruining=既に崩壊済み"
     )
-    async def raid(self, interaction: discord.Interaction, limit: int = 20, mode: str = "ruining"):
-        """Display towns - can show either ruining or inactive mayor towns"""
+    async def raid(self, interaction: discord.Interaction, limit: int = 20, mode: str = "inactive-mayor"):
+        """Display towns about to ruin (mayors inactive 40+ days) or already ruined"""
         await interaction.response.defer()
 
         try:
@@ -252,23 +280,24 @@ class RaidCog(commands.Cog):
                 return
 
             # Get towns based on mode
-            if mode.lower() == "inactive-mayor":
+            if mode.lower() == "ruining":
+                # Already ruined towns
+                towns_to_display = self.api.get_ruining_towns(towns, limit=limit)
+                title = "⚔️ 既に崩壊したタウン"
+                empty_message = "既に崩壊したタウンはありません。"
+                data_key = "ruinedAt"
+                date_label = "崩壊日"
+            else:
+                # Default to inactive mayors (upcoming ruins)
                 await interaction.followup.send(
-                    content="⏳ 市長が非アクティブなタウンを取得中... (数分かかることがあります)",
+                    content="⏳ 市長が非アクティブなタウンを取得中...",
                     ephemeral=True
                 )
                 towns_to_display = await self.api.get_inactive_mayor_towns(towns, days=40, limit=limit)
-                title = "👻 市長が非アクティブなタウン (40日以上ログインなし)"
+                title = "👻 崩壊予定タウン (市長が40日以上ログインなし)"
                 empty_message = "市長が40日以上ログインしていないタウンはありません。"
                 data_key = "mayor_inactive_days"
                 date_label = "市長が非アクティブな日数"
-            else:
-                # Default to ruining
-                towns_to_display = self.api.get_ruining_towns(towns, limit=limit)
-                title = "⚔️ 崩壊予定タウン"
-                empty_message = "現在、崩壊予定のタウンはありません。"
-                data_key = "ruinedAt"
-                date_label = "崩壊予定日"
 
             if not towns_to_display:
                 await interaction.followup.send(
