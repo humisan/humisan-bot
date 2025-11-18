@@ -367,35 +367,44 @@ class EarthMCCog(commands.Cog):
             if 'wiki' in town_data and town_data['wiki']:
                 embed.add_field(name="📖 **Wiki**", value=f"[リンク]({town_data['wiki']})", inline=False)
 
-            # Residents list (limited to avoid embed size limits)
+            # Residents list - split into multiple fields if needed
             if 'residents' in town_data:
                 residents = town_data['residents']
                 if isinstance(residents, list) and residents:
-                    resident_names = [r.get('name', 'Unknown') if isinstance(r, dict) else r for r in residents[:10]]
-                    resident_text = ", ".join(resident_names)
-                    if len(residents) > 10:
-                        resident_text += f" +{len(residents) - 10}人"
-                    embed.add_field(name="住民 (最初10人)", value=resident_text, inline=False)
+                    resident_names = [r.get('name', 'Unknown') if isinstance(r, dict) else r for r in residents]
+                    # Split into chunks of ~50 names per field to avoid character limit
+                    chunk_size = 50
+                    for i in range(0, len(resident_names), chunk_size):
+                        chunk = resident_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"👥 **住民** ({i+1}-{min(i+chunk_size, len(resident_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
-            # Trusted list (limited)
+            # Trusted list - split into multiple fields if needed
             if 'trusted' in town_data:
                 trusted = town_data['trusted']
                 if isinstance(trusted, list) and trusted:
-                    trusted_names = [t.get('name', 'Unknown') if isinstance(t, dict) else t for t in trusted[:5]]
-                    trusted_text = ", ".join(trusted_names)
-                    if len(trusted) > 5:
-                        trusted_text += f" +{len(trusted) - 5}人"
-                    embed.add_field(name="信頼メンバー (最初5人)", value=trusted_text, inline=False)
+                    trusted_names = [t.get('name', 'Unknown') if isinstance(t, dict) else t for t in trusted]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(trusted_names), chunk_size):
+                        chunk = trusted_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"🤝 **信頼メンバー** ({i+1}-{min(i+chunk_size, len(trusted_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
-            # Outlaws list (limited)
+            # Outlaws list - split into multiple fields if needed
             if 'outlaws' in town_data:
                 outlaws = town_data['outlaws']
                 if isinstance(outlaws, list) and outlaws:
-                    outlaw_names = [o.get('name', 'Unknown') if isinstance(o, dict) else o for o in outlaws[:5]]
-                    outlaw_text = ", ".join(outlaw_names)
-                    if len(outlaws) > 5:
-                        outlaw_text += f" +{len(outlaws) - 5}人"
-                    embed.add_field(name="アウトロー (最初5人)", value=outlaw_text, inline=False)
+                    outlaw_names = [o.get('name', 'Unknown') if isinstance(o, dict) else o for o in outlaws]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(outlaw_names), chunk_size):
+                        chunk = outlaw_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"⚠️ **アウトロー** ({i+1}-{min(i+chunk_size, len(outlaw_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
             embed.set_footer(text="EarthMC Aurora サーバー")
 
@@ -505,45 +514,57 @@ class EarthMCCog(commands.Cog):
             if 'wiki' in nation_data and nation_data['wiki']:
                 embed.add_field(name="📖 **Wiki**", value=f"[リンク]({nation_data['wiki']})", inline=False)
 
-            # Residents list (limited)
+            # Residents list - split into multiple fields if needed
             if 'residents' in nation_data:
                 residents = nation_data['residents']
                 if isinstance(residents, list) and residents:
-                    resident_names = [r.get('name', 'Unknown') if isinstance(r, dict) else r for r in residents[:10]]
-                    resident_text = ", ".join(resident_names)
-                    if len(residents) > 10:
-                        resident_text += f" +{len(residents) - 10}人"
-                    embed.add_field(name="国民 (最初10人)", value=resident_text, inline=False)
+                    resident_names = [r.get('name', 'Unknown') if isinstance(r, dict) else r for r in residents]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(resident_names), chunk_size):
+                        chunk = resident_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"👥 **国民** ({i+1}-{min(i+chunk_size, len(resident_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
-            # Towns list (limited)
+            # Towns list - split into multiple fields if needed
             if 'towns' in nation_data:
                 towns = nation_data['towns']
                 if isinstance(towns, list) and towns:
-                    town_names = [t.get('name', 'Unknown') if isinstance(t, dict) else t for t in towns[:10]]
-                    town_text = ", ".join(town_names)
-                    if len(towns) > 10:
-                        town_text += f" +{len(towns) - 10}町"
-                    embed.add_field(name="タウン (最初10個)", value=town_text, inline=False)
+                    town_names = [t.get('name', 'Unknown') if isinstance(t, dict) else t for t in towns]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(town_names), chunk_size):
+                        chunk = town_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"🏘️ **タウン** ({i+1}-{min(i+chunk_size, len(town_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
-            # Allies list (limited)
+            # Allies list - split into multiple fields if needed
             if 'allies' in nation_data:
                 allies = nation_data['allies']
                 if isinstance(allies, list) and allies:
-                    ally_names = [a.get('name', 'Unknown') if isinstance(a, dict) else a for a in allies[:5]]
-                    ally_text = ", ".join(ally_names)
-                    if len(allies) > 5:
-                        ally_text += f" +{len(allies) - 5}国"
-                    embed.add_field(name="同盟国 (最初5国)", value=ally_text, inline=False)
+                    ally_names = [a.get('name', 'Unknown') if isinstance(a, dict) else a for a in allies]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(ally_names), chunk_size):
+                        chunk = ally_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"🤝 **同盟国** ({i+1}-{min(i+chunk_size, len(ally_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
-            # Enemies list (limited)
+            # Enemies list - split into multiple fields if needed
             if 'enemies' in nation_data:
                 enemies = nation_data['enemies']
                 if isinstance(enemies, list) and enemies:
-                    enemy_names = [e.get('name', 'Unknown') if isinstance(e, dict) else e for e in enemies[:5]]
-                    enemy_text = ", ".join(enemy_names)
-                    if len(enemies) > 5:
-                        enemy_text += f" +{len(enemies) - 5}国"
-                    embed.add_field(name="敵国 (最初5国)", value=enemy_text, inline=False)
+                    enemy_names = [e.get('name', 'Unknown') if isinstance(e, dict) else e for e in enemies]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(enemy_names), chunk_size):
+                        chunk = enemy_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"⚔️ **敵国** ({i+1}-{min(i+chunk_size, len(enemy_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
             embed.set_footer(text="EarthMC Aurora サーバー")
 
@@ -677,15 +698,18 @@ class EarthMCCog(commands.Cog):
                 if rank_text:
                     embed.add_field(name="**ランク**", value=rank_text, inline=False)
 
-            # Friends list (limited)
+            # Friends list - split into multiple fields if needed
             if 'friends' in player_data:
                 friends = player_data['friends']
                 if isinstance(friends, list) and friends:
-                    friend_names = [f.get('name', 'Unknown') if isinstance(f, dict) else f for f in friends[:5]]
-                    friend_text = "`" + "`, `".join(friend_names) + "`"
-                    if len(friends) > 5:
-                        friend_text += f" +{len(friends) - 5}人"
-                    embed.add_field(name="👥 **フレンド (最初5人)**", value=friend_text, inline=False)
+                    friend_names = [f.get('name', 'Unknown') if isinstance(f, dict) else f for f in friends]
+                    # Split into chunks
+                    chunk_size = 50
+                    for i in range(0, len(friend_names), chunk_size):
+                        chunk = friend_names[i:i+chunk_size]
+                        chunk_text = "`, `".join(chunk)
+                        field_name = f"👥 **フレンド** ({i+1}-{min(i+chunk_size, len(friend_names))})"
+                        embed.add_field(name=field_name, value=f"`{chunk_text}`", inline=False)
 
             embed.set_footer(text="EarthMC Aurora サーバー")
 
