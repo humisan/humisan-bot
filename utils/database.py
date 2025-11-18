@@ -183,6 +183,20 @@ class Database:
                 )
             ''')
 
+            # EarthMC VoteParty notifications table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS earthmc_voteparty_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT NOT NULL UNIQUE,
+                    channel_id TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    last_notified_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE
+                )
+            ''')
+
             # Create indexes for new tables
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_music_history_user
@@ -192,6 +206,11 @@ class Database:
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_user_stats_guild
                 ON user_stats(guild_id, user_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_earthmc_voteparty_guild
+                ON earthmc_voteparty_channels(guild_id)
             ''')
 
             conn.commit()
@@ -1176,6 +1195,161 @@ class Database:
         except sqlite3.Error as e:
             logger.error(f"Error getting genre history: {e}")
             return []
+        finally:
+            conn.close()
+
+    # ==================== EARTHMC VOTEPARTY NOTIFICATION METHODS ====================
+
+    def setup_earthmc_voteparty_notifications(self, guild_id: str, channel_id: str) -> bool:
+        """
+        Enable EarthMC VoteParty notifications for a guild
+
+        Args:
+            guild_id: Discord guild ID
+            channel_id: Discord channel ID for notifications
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO earthmc_voteparty_channels (guild_id, channel_id, enabled)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    channel_id = ?,
+                    enabled = 1,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (guild_id, channel_id, channel_id))
+
+            conn.commit()
+            logger.info(f"EarthMC VoteParty notifications enabled for guild {guild_id} in channel {channel_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error setting up EarthMC VoteParty notifications: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def disable_earthmc_voteparty_notifications(self, guild_id: str) -> bool:
+        """
+        Disable EarthMC VoteParty notifications for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE earthmc_voteparty_channels
+                SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            logger.info(f"EarthMC VoteParty notifications disabled for guild {guild_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error disabling EarthMC VoteParty notifications: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def get_earthmc_voteparty_notification_settings(self, guild_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get EarthMC VoteParty notification settings for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            Dictionary with notification settings or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, channel_id, enabled, last_notified_at, created_at, updated_at
+                FROM earthmc_voteparty_channels
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            row = cursor.fetchone()
+            if row:
+                return dict(row)
+            return None
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting EarthMC VoteParty notification settings: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_earthmc_voteparty_notifications(self) -> List[Dict[str, Any]]:
+        """
+        Get all active EarthMC VoteParty notification configurations
+
+        Returns:
+            List of notification configurations where enabled is true
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT id, guild_id, channel_id, enabled, last_notified_at, created_at, updated_at
+                FROM earthmc_voteparty_channels
+                WHERE enabled = 1
+            ''')
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting all EarthMC VoteParty notification configurations: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def update_earthmc_voteparty_notification_time(self, guild_id: str) -> bool:
+        """
+        Update the last notification time for VoteParty
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE earthmc_voteparty_channels
+                SET last_notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error updating EarthMC VoteParty notification time: {e}")
+            conn.rollback()
+            return False
         finally:
             conn.close()
 
