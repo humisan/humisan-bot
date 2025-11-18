@@ -190,6 +190,12 @@ class RaidAPI:
 
                 # Step 3: Check inactivity for each mayor's towns
                 for mayor_name, mayor_data in mayors_data.items():
+                    # Skip NPC mayors (already ruined towns)
+                    is_npc = mayor_data.get('status', {}).get('isNPC', False)
+                    if is_npc:
+                        logger.debug(f"Skipping NPC mayor: {mayor_name} (already ruined town)")
+                        continue
+
                     last_online = mayor_data.get('timestamps', {}).get('lastOnline')
 
                     if last_online:
