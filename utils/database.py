@@ -196,6 +196,19 @@ class Database:
                 )
             ''')
 
+            # Raid notification channels table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS raid_notification_channels (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    guild_id TEXT NOT NULL UNIQUE,
+                    channel_id TEXT NOT NULL,
+                    enabled BOOLEAN DEFAULT 1,
+                    last_notified_at DATETIME,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
             # Create indexes for new tables
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_music_history_user
@@ -210,6 +223,11 @@ class Database:
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_earthmc_voteparty_guild
                 ON earthmc_voteparty_channels(guild_id)
+            ''')
+
+            cursor.execute('''
+                CREATE INDEX IF NOT EXISTS idx_raid_notification_guild
+                ON raid_notification_channels(guild_id)
             ''')
 
             conn.commit()
@@ -1347,6 +1365,157 @@ class Database:
 
         except sqlite3.Error as e:
             logger.error(f"Error updating EarthMC VoteParty notification time: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def setup_raid_notifications(self, guild_id: str, channel_id: str) -> bool:
+        """
+        Set up Raid notifications for a guild
+
+        Args:
+            guild_id: Discord guild ID
+            channel_id: Discord channel ID for notifications
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                INSERT INTO raid_notification_channels (guild_id, channel_id, enabled)
+                VALUES (?, ?, 1)
+                ON CONFLICT(guild_id) DO UPDATE SET
+                    channel_id = ?,
+                    enabled = 1,
+                    updated_at = CURRENT_TIMESTAMP
+            ''', (guild_id, channel_id, channel_id))
+
+            conn.commit()
+            logger.info(f"Raid notifications enabled for guild {guild_id} in channel {channel_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error setting up Raid notifications: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def disable_raid_notifications(self, guild_id: str) -> bool:
+        """
+        Disable Raid notifications for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE raid_notification_channels
+                SET enabled = 0, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            logger.info(f"Raid notifications disabled for guild {guild_id}")
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error disabling Raid notifications: {e}")
+            conn.rollback()
+            return False
+        finally:
+            conn.close()
+
+    def get_raid_notification_settings(self, guild_id: str) -> Optional[dict]:
+        """
+        Get Raid notification settings for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            Dictionary with notification settings or None if not found
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT guild_id, channel_id, enabled, last_notified_at, created_at, updated_at
+                FROM raid_notification_channels
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting Raid notification settings: {e}")
+            return None
+        finally:
+            conn.close()
+
+    def get_all_raid_notifications(self) -> list:
+        """
+        Get all active Raid notification configurations
+
+        Returns:
+            List of dictionaries containing notification settings
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                SELECT guild_id, channel_id, enabled, last_notified_at, created_at, updated_at
+                FROM raid_notification_channels
+                WHERE enabled = 1
+            ''')
+
+            rows = cursor.fetchall()
+            return [dict(row) for row in rows]
+
+        except sqlite3.Error as e:
+            logger.error(f"Error getting all Raid notifications: {e}")
+            return []
+        finally:
+            conn.close()
+
+    def update_raid_notification_time(self, guild_id: str) -> bool:
+        """
+        Update last notification time for a guild
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        conn = self._get_connection()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute('''
+                UPDATE raid_notification_channels
+                SET last_notified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE guild_id = ?
+            ''', (guild_id,))
+
+            conn.commit()
+            return True
+
+        except sqlite3.Error as e:
+            logger.error(f"Error updating Raid notification time: {e}")
             conn.rollback()
             return False
         finally:
