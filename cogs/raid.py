@@ -441,15 +441,20 @@ class RaidCog(commands.Cog):
     async def monitor_raids(self):
         """Periodically check and notify about ruin times"""
         if self.db is None:
+            logger.debug("Raid monitoring: Database not initialized")
             return
 
         try:
+            logger.info("Starting raid monitoring task...")
             # Get all towns
             towns = await self.api.get_all_towns(use_cache=False)
 
             if not towns:
-                logger.warning("Failed to fetch towns for raid monitoring")
+                logger.warning("Raid monitoring: Failed to fetch towns from API (returned None or empty)")
                 return
+
+            if len(towns) == 0:
+                logger.warning("Raid monitoring: Retrieved 0 towns from API")
 
             # Get ruining towns
             ruining_towns = self.api.get_ruining_towns(towns, limit=20)
