@@ -192,8 +192,7 @@ class Database:
                     enabled BOOLEAN DEFAULT 1,
                     last_notified_at DATETIME,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 

@@ -31,7 +31,7 @@ def format_timestamp(timestamp) -> str:
 
 # EarthMC API configuration
 EARTHMC_API_BASE = "https://api.earthmc.net/v3/aurora"
-EARTHMC_SERVER_ENDPOINT = f"{EARTHMC_API_BASE}/server"
+EARTHMC_SERVER_ENDPOINT = f"{EARTHMC_API_BASE}/"
 EARTHMC_TOWNS_ENDPOINT = f"{EARTHMC_API_BASE}/towns"
 EARTHMC_NATIONS_ENDPOINT = f"{EARTHMC_API_BASE}/nations"
 EARTHMC_PLAYERS_ENDPOINT = f"{EARTHMC_API_BASE}/players"
@@ -353,9 +353,9 @@ class EarthMCCog(commands.Cog):
                 if 'numOutlaws' in stats:
                     stats_text += f"⚠️ **アウトロー:** `{stats['numOutlaws']}`\n"
                 if 'balance' in stats:
-                    stats_text += f"💰 **資金:** `${stats['balance']}`\n"
+                    stats_text += f"💰 **資金:** `{stats['balance']} G`\n"
                 if 'forSalePrice' in stats and stats['forSalePrice']:
-                    stats_text += f"💵 **販売価格:** `${stats['forSalePrice']}`"
+                    stats_text += f"💵 **販売価格:** `{stats['forSalePrice']} G`"
                 if stats_text:
                     embed.add_field(name="**統計情報**", value=stats_text.rstrip("\n"), inline=False)
 
@@ -493,7 +493,7 @@ class EarthMCCog(commands.Cog):
                 if 'numEnemies' in stats:
                     stats_text += f"⚔️ **敵国:** `{stats['numEnemies']}`\n"
                 if 'balance' in stats:
-                    stats_text += f"💰 **資金:** `${stats['balance']}`"
+                    stats_text += f"💰 **資金:** `{stats['balance']} G`"
                 if stats_text:
                     embed.add_field(name="**統計情報**", value=stats_text.rstrip("\n"), inline=False)
 
@@ -650,7 +650,7 @@ class EarthMCCog(commands.Cog):
                 stats = player_data['stats']
                 stats_text = ""
                 if 'balance' in stats:
-                    stats_text += f"💰 **資金:** `${stats['balance']}`\n"
+                    stats_text += f"💰 **所持金:** `{stats['balance']} G`\n"
                 if 'numFriends' in stats:
                     stats_text += f"🤝 **フレンド数:** `{stats['numFriends']}`"
                 if stats_text:
