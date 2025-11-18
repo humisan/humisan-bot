@@ -22,19 +22,19 @@ class RaidAPI:
 
     def __init__(self):
         self.base_url = EARTHMC_API_BASE
-        self.timeout = aiohttp.ClientTimeout(total=10)
+        self.timeout = aiohttp.ClientTimeout(total=30)  # Extended timeout for batch processing
         self._cache = {}
         self._cache_time = {}
 
     async def get_all_towns(self, use_cache: bool = True) -> Optional[List[Dict[str, Any]]]:
         """
-        Get all towns from the server
+        Get all towns from the server with timestamps
 
         Args:
             use_cache: Whether to use cached data
 
         Returns:
-            List of town dictionaries or None if error
+            List of town dictionaries with timestamps or None if error
         """
         if use_cache and self._is_cache_valid('all_towns'):
             logger.debug("Using cached all towns data")
@@ -42,20 +42,41 @@ class RaidAPI:
 
         try:
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"query": []}) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if isinstance(data, list):
-                            self._cache['all_towns'] = data
-                            self._cache_time['all_towns'] = datetime.now()
-                            logger.info(f"Successfully fetched {len(data)} towns")
-                            return data
-                        else:
-                            logger.warning("Unexpected response format from towns endpoint")
-                            return None
-                    else:
+                # Step 1: Get all town names from the list endpoint
+                async with session.get(EARTHMC_TOWNS_ENDPOINT) as response:
+                    if response.status != 200:
                         logger.error(f"EarthMC API returned status {response.status}")
                         return None
+
+                    town_list = await response.json()
+                    if not isinstance(town_list, list):
+                        logger.warning("Unexpected response format from towns endpoint")
+                        return None
+
+                # Step 2: Get detailed information for all towns in batches
+                batch_size = 100
+                all_towns_detailed = []
+                town_names = [t['name'] for t in town_list]
+
+                for i in range(0, len(town_names), batch_size):
+                    batch = town_names[i:i+batch_size]
+
+                    async with session.post(EARTHMC_TOWNS_ENDPOINT, json={"query": batch}) as batch_response:
+                        if batch_response.status == 200:
+                            batch_data = await batch_response.json()
+                            if isinstance(batch_data, list):
+                                all_towns_detailed.extend(batch_data)
+                        else:
+                            logger.warning(f"Error fetching batch {i//batch_size}: status {batch_response.status}")
+
+                if all_towns_detailed:
+                    self._cache['all_towns'] = all_towns_detailed
+                    self._cache_time['all_towns'] = datetime.now()
+                    logger.info(f"Successfully fetched {len(all_towns_detailed)} towns with timestamps")
+                    return all_towns_detailed
+                else:
+                    logger.warning("No town data retrieved")
+                    return None
 
         except asyncio.TimeoutError:
             logger.error("Timeout while fetching all towns")
