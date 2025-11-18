@@ -915,13 +915,10 @@ class EarthMCCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     """Load the EarthMC cog"""
-    # Create a temporary instance to register command groups
     cog = EarthMCCog(bot)
-
-    # Add the main command group
-    bot.tree.add_command(cog.earthmc_group)
-    # Add the voteparty notify subgroup to the main group
-    cog.earthmc_group.add_command(cog.voteparty_group)
-
     await bot.add_cog(cog)
+
+    # Register command groups with the bot
+    bot.tree.add_command(cog.earthmc_group)
+
     logger.info("EarthMC cog loaded successfully")
