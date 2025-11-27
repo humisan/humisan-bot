@@ -232,17 +232,18 @@ class Games(commands.Cog):
 
     async def game_loop(self, message: discord.Message, game: Connect4Game, view: Connect4View, channel_id: int):
         """ゲームループ"""
-        last_displayed_col = None
+        last_displayed_state = str(game.board)
 
         while not game.game_over and not view.game_over:
             try:
                 await asyncio.sleep(0.5)
 
                 # ゲーム状態が変わっていなければスキップ
-                if game.last_move_col == last_displayed_col:
+                current_state = str(game.board)
+                if current_state == last_displayed_state:
                     continue
 
-                last_displayed_col = game.last_move_col
+                last_displayed_state = current_state
 
                 # 勝者判定
                 if game.check_winner():
