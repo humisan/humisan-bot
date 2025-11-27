@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
+from discord import app_commands, ui
 import asyncio
 from typing import Optional
 from utils.helpers import create_error_embed
@@ -31,6 +31,7 @@ class Connect4Game:
         self.game_over = False
         self.winner = None
         self.column_heights = [0] * self.COLS
+        self.last_move_col = None
 
     def drop_piece(self, col: int) -> bool:
         """列にピースをドロップ"""
@@ -43,6 +44,7 @@ class Connect4Game:
         row = self.ROWS - 1 - self.column_heights[col]
         self.board[row][col] = self.current_player
         self.column_heights[col] += 1
+        self.last_move_col = col
 
         return True
 
@@ -109,6 +111,58 @@ class Connect4Game:
         self.current_player = self.PLAYER2 if self.current_player == self.PLAYER1 else self.PLAYER1
 
 
+class Connect4View(ui.View):
+    """四目並べ用ボタンビュー"""
+
+    def __init__(self, game: 'Connect4Game', timeout: int = 300):
+        super().__init__(timeout=timeout)
+        self.game = game
+        self.game_over = False
+
+        # 各列のボタンを作成
+        for col in range(Connect4Game.COLS):
+            button = ui.Button(
+                label=str(col + 1),
+                style=discord.ButtonStyle.primary,
+                custom_id=f"connect4_col_{col}"
+            )
+            button.callback = self.make_column_callback(col)
+            self.add_item(button)
+
+    def make_column_callback(self, col: int):
+        async def callback(interaction: discord.Interaction):
+            current_player = self.game.player1 if self.game.current_player == Connect4Game.PLAYER1 else self.game.player2
+
+            if interaction.user.id != current_player.id:
+                await interaction.response.send_message(
+                    "あなたのターンではありません",
+                    ephemeral=True
+                )
+                return
+
+            if self.game_over:
+                await interaction.response.send_message(
+                    "ゲームは既に終了しています",
+                    ephemeral=True
+                )
+                return
+
+            if self.game.column_heights[col] >= Connect4Game.ROWS:
+                await interaction.response.send_message(
+                    "その列は満杯です",
+                    ephemeral=True
+                )
+                return
+
+            self.game.drop_piece(col)
+            await interaction.response.defer()
+
+        return callback
+
+    async def on_timeout(self):
+        self.game_over = True
+
+
 class Games(commands.Cog):
     """ゲーム機能"""
 
@@ -163,50 +217,37 @@ class Games(commands.Cog):
             )
             embed.set_footer(text=f"次のターン: {interaction.user.name} ({game.P1_EMOJI})")
 
-            await interaction.response.send_message(embed=embed)
+            view = Connect4View(game)
+            await interaction.response.send_message(embed=embed, view=view)
             msg = await interaction.original_response()
 
-            # リアクション追加
-            for emoji in Connect4Game.COLUMN_EMOJIS:
-                await msg.add_reaction(emoji)
-
             # ゲームループ
-            await self.game_loop(msg, game, interaction.channel_id)
+            await self.game_loop(msg, game, view, interaction.channel_id)
 
         except Exception as e:
             logger.error(f"Error in connect4 command: {str(e)}")
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=create_error_embed("四目並べエラー", str(e)), ephemeral=True)
 
-    async def game_loop(self, message: discord.Message, game: Connect4Game, channel_id: int):
+    async def game_loop(self, message: discord.Message, game: Connect4Game, view: Connect4View, channel_id: int):
         """ゲームループ"""
-        def check(reaction: discord.Reaction, user: discord.User) -> bool:
-            current_player = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
-            return (
-                reaction.message.id == message.id and
-                user.id == current_player.id and
-                str(reaction.emoji) in Connect4Game.COLUMN_EMOJIS
-            )
+        last_displayed_col = None
 
-        while not game.game_over:
+        while not game.game_over and not view.game_over:
             try:
-                reaction, user = await self.bot.wait_for('reaction_add', timeout=300, check=check)
+                await asyncio.sleep(0.5)
 
-                col = Connect4Game.COLUMN_EMOJIS.index(str(reaction.emoji))
-
-                # 列が満杯の場合
-                if game.column_heights[col] >= Connect4Game.ROWS:
-                    await message.remove_reaction(reaction.emoji, user)
+                # ゲーム状態が変わっていなければスキップ
+                if game.last_move_col == last_displayed_col:
                     continue
 
-                # ピースをドロップ
-                game.drop_piece(col)
+                last_displayed_col = game.last_move_col
 
                 # 勝者判定
                 if game.check_winner():
                     winner = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
                     game.game_over = True
-                    game.winner = winner
+                    view.game_over = True
 
                     embed = discord.Embed(
                         title="🎉 ゲーム終了",
@@ -215,10 +256,12 @@ class Games(commands.Cog):
                         timestamp=discord.utils.utcnow()
                     )
                     embed.set_footer(text="おめでとうございます！")
-                    await message.edit(embed=embed)
+                    await message.edit(embed=embed, view=None)
+                    break
 
                 elif game.is_board_full():
                     game.game_over = True
+                    view.game_over = True
 
                     embed = discord.Embed(
                         title="🤝 ゲーム終了",
@@ -226,11 +269,11 @@ class Games(commands.Cog):
                         color=discord.Color.greyple(),
                         timestamp=discord.utils.utcnow()
                     )
-                    await message.edit(embed=embed)
+                    await message.edit(embed=embed, view=None)
+                    break
 
                 else:
-                    # 次のプレイヤーへ
-                    game.switch_player()
+                    # 盤面を更新
                     current_player = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
                     emoji = game.P1_EMOJI if game.current_player == Connect4Game.PLAYER1 else game.P2_EMOJI
 
@@ -241,21 +284,7 @@ class Games(commands.Cog):
                         timestamp=discord.utils.utcnow()
                     )
                     embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                    await message.edit(embed=embed)
-
-                # リアクション削除
-                await message.remove_reaction(reaction.emoji, user)
-
-            except asyncio.TimeoutError:
-                game.game_over = True
-                embed = discord.Embed(
-                    title="⏱️ ゲーム中止",
-                    description="5分以上操作がなかったためゲームを中止しました。",
-                    color=discord.Color.orange(),
-                    timestamp=discord.utils.utcnow()
-                )
-                await message.edit(embed=embed)
-                break
+                    await message.edit(embed=embed, view=view)
 
             except Exception as e:
                 logger.error(f"Error in game loop: {str(e)}")
