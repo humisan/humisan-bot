@@ -155,6 +155,7 @@ class Connect4View(ui.View):
                 return
 
             self.game.drop_piece(col)
+            self.game.switch_player()
             await interaction.response.defer()
 
         return callback
