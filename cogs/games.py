@@ -163,7 +163,8 @@ class Games(commands.Cog):
             )
             embed.set_footer(text=f"次のターン: {interaction.user.name} ({game.P1_EMOJI})")
 
-            msg = await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
+            msg = await interaction.original_response()
 
             # リアクション追加
             for emoji in Connect4Game.COLUMN_EMOJIS:
