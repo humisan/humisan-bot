@@ -735,8 +735,8 @@ class OthelloGame:
         col_nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
         row_nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
 
-        # ヘッダー行（左上は⚪、その後に列番号）
-        display = "⚪"
+        # ヘッダー行（左上は⏹️、その後に列番号）
+        display = "⏹️"
         for emoji in col_nums:
             display += emoji
         display += "\n"
