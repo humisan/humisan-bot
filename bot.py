@@ -117,14 +117,27 @@ async def load_cogs():
 @bot.event
 async def on_ready():
     """ボットが起動した時のイベント"""
-    logger.info(f'{bot.user} is ready!')
+    logger.info("=" * 60)
+    logger.info(f"Bot Version/Commit: {get_git_info()}")
+    logger.info("=" * 60)
+    logger.info(f'{bot.user} has connected to Discord!')
 
     # ボットのステータスを設定（常に idle を維持）
     activity = discord.Activity(type=discord.ActivityType.watching, name="/help で コマンド一覧を表示")
     await bot.change_presence(status=discord.Status.idle, activity=activity)
 
     try:
+        logger.info("Syncing application commands (Global)...")
         synced = await bot.tree.sync()
+        logger.info(f"Successfully synced {len(synced)} global application command(s)")
+
+        if synced:
+            logger.info("Synced commands:")
+            for cmd in synced:
+                logger.info(f"  - /{cmd.name}")
+        else:
+            logger.warning("No commands were synced!")
+
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
