@@ -296,7 +296,7 @@ class Games(commands.Cog):
                         inline=False
                     )
                     embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                    await msg.edit(embed=embed, view=view)
+                    await msg.edit(embed=embed)
 
             view = OthelloView(game, on_move, timeout=300)
             await interaction.response.send_message(embed=embed)
@@ -779,27 +779,35 @@ class OthelloView(ui.View):
     async def setup_reactions(self):
         """リアクションを設定（メッセージが必要）"""
         if not self.message:
+            logger.error("OthelloView: message is None in setup_reactions")
             return
 
-        # 列のリアクションを追加
-        for emoji in self.COLUMN_EMOJIS:
-            try:
-                await self.message.add_reaction(emoji)
-            except discord.errors.HTTPException:
-                await asyncio.sleep(0.2)
-
-        # 行のリアクションを追加
-        for emoji in self.ROW_EMOJIS:
-            try:
-                await self.message.add_reaction(emoji)
-            except discord.errors.HTTPException:
-                await asyncio.sleep(0.2)
-
-        # キャンセルボタン
         try:
-            await self.message.add_reaction("❌")
-        except discord.errors.HTTPException:
-            pass
+            # 列のリアクションを追加
+            for emoji in self.COLUMN_EMOJIS:
+                try:
+                    await self.message.add_reaction(emoji)
+                    await asyncio.sleep(0.1)
+                except discord.errors.HTTPException as e:
+                    logger.warning(f"Failed to add column emoji {emoji}: {str(e)}")
+                    await asyncio.sleep(0.3)
+
+            # 行のリアクションを追加
+            for emoji in self.ROW_EMOJIS:
+                try:
+                    await self.message.add_reaction(emoji)
+                    await asyncio.sleep(0.1)
+                except discord.errors.HTTPException as e:
+                    logger.warning(f"Failed to add row emoji {emoji}: {str(e)}")
+                    await asyncio.sleep(0.3)
+
+            # キャンセルボタン
+            try:
+                await self.message.add_reaction("❌")
+            except discord.errors.HTTPException as e:
+                logger.warning(f"Failed to add cancel emoji: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error in setup_reactions: {str(e)}\n{traceback.format_exc()}")
 
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
         """リアクション追加時の処理"""
@@ -996,10 +1004,13 @@ class TicTacToeView(ui.View):
         # Othelloゲームのリアクション処理
         if reaction.message.id in self.othello_views:
             view = self.othello_views[reaction.message.id]
+            logger.debug(f"Othello reaction detected: {reaction.emoji} by {user.name}")
             try:
                 await view.on_reaction_add(reaction, user)
+                logger.debug(f"Othello reaction processed successfully")
             except Exception as e:
                 logger.error(f"Error handling Othello reaction: {str(e)}")
+                logger.error(traceback.format_exc())
                 await send_error_to_discord(
                     self.bot,
                     "オセロリアクションエラー",
