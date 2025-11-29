@@ -743,6 +743,7 @@ class OthelloGame:
 
         for row in range(self.ROWS):
             display += row_nums[row]
+            display += " "
             for col in range(self.COLS):
                 cell = self.board[row][col]
                 if cell == self.EMPTY:
