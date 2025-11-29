@@ -307,6 +307,7 @@ class Games(commands.Cog):
 
             # viewを保存してリアクションハンドラで使用できるようにする
             self.othello_views[msg.id] = view
+            logger.info(f"Othello view stored for message {msg.id}. Total views: {len(self.othello_views)}")
 
             # リアクションを追加
             try:
@@ -830,57 +831,83 @@ class OthelloView(ui.View):
 
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
         """リアクション追加時の処理"""
+        logger.info(f"OthelloView.on_reaction_add called: {reaction.emoji} by {user.name}")
+
         if user.bot or self.game_over:
+            logger.info(f"Ignoring: user.bot={user.bot}, game_over={self.game_over}")
             return
 
         # 現在のプレイヤーの確認
         current_player_user = self.game.player1 if self.game.current_player == OthelloGame.BLACK else self.game.player2
         if user.id != current_player_user.id:
-            await reaction.remove(user)
+            logger.info(f"Wrong player: {user.name} ({user.id}) is not {current_player_user.name} ({current_player_user.id})")
+            try:
+                await reaction.remove(user)
+            except Exception as e:
+                logger.warning(f"Failed to remove reaction: {str(e)}")
             return
 
         emoji = reaction.emoji
+        logger.info(f"Processing emoji: {emoji}")
 
         # キャンセル
         if emoji == "❌":
+            logger.info(f"Cancel pressed, resetting selection")
             self.selected_col = None
             self.selected_row = None
-            await reaction.remove(user)
+            try:
+                await reaction.remove(user)
+            except Exception as e:
+                logger.warning(f"Failed to remove cancel reaction: {str(e)}")
             return
 
         # 列の選択
         if emoji in self.COLUMN_EMOJIS:
             self.selected_col = self.COLUMN_EMOJIS.index(emoji)
-            await reaction.remove(user)
+            logger.info(f"Column selected: {self.selected_col} (emoji: {emoji})")
+            try:
+                await reaction.remove(user)
+            except Exception as e:
+                logger.warning(f"Failed to remove column reaction: {str(e)}")
 
         # 行の選択
         elif emoji in self.ROW_EMOJIS:
             self.selected_row = self.ROW_EMOJIS.index(emoji)
-            await reaction.remove(user)
+            logger.info(f"Row selected: {self.selected_row} (emoji: {emoji})")
+            try:
+                await reaction.remove(user)
+            except Exception as e:
+                logger.warning(f"Failed to remove row reaction: {str(e)}")
 
         # 列と行の両方が選択されたら手を実行
         if self.selected_col is not None and self.selected_row is not None:
             row = self.selected_row
             col = self.selected_col
+            logger.info(f"Both col and row selected: {chr(col+ord('a'))}{row+1}")
 
             # 有効な手か確認
             valid_moves = self.game.get_valid_moves()
             if (row, col) not in valid_moves:
+                valid_moves_str = ", ".join([f"{chr(c+ord('a'))}{r+1}" for r, c in valid_moves])
+                logger.warning(f"Invalid move: {chr(col+ord('a'))}{row+1} not in {valid_moves_str}")
                 # 無効な手の場合、選択をリセット
                 self.selected_col = None
                 self.selected_row = None
                 return
 
             # 手を実行
+            logger.info(f"Executing move: {chr(col+ord('a'))}{row+1}")
             self.game.place_piece(row, col)
             self.game.switch_player()
 
             # コールバックを実行（盤面を更新）
+            logger.info(f"Calling on_move_callback")
             await self.on_move_callback()
 
             # 選択をリセット
             self.selected_col = None
             self.selected_row = None
+            logger.info(f"Move completed and selection reset")
 
     async def on_timeout(self):
         self.game_over = True
@@ -1017,16 +1044,20 @@ class TicTacToeView(ui.View):
     @commands.Cog.listener()
     async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
         """リアクション追加イベント"""
+        logger.info(f"Reaction added: {reaction.emoji} by {user.name} on message {reaction.message.id}")
+        logger.info(f"Active othello_views: {list(self.othello_views.keys())}")
+
         if user.bot:
+            logger.debug(f"Ignoring bot reaction")
             return
 
         # Othelloゲームのリアクション処理
         if reaction.message.id in self.othello_views:
             view = self.othello_views[reaction.message.id]
-            logger.debug(f"Othello reaction detected: {reaction.emoji} by {user.name}")
+            logger.info(f"Othello reaction detected: {reaction.emoji} by {user.name}")
             try:
                 await view.on_reaction_add(reaction, user)
-                logger.debug(f"Othello reaction processed successfully")
+                logger.info(f"Othello reaction processed successfully")
             except Exception as e:
                 logger.error(f"Error handling Othello reaction: {str(e)}")
                 logger.error(traceback.format_exc())
@@ -1036,6 +1067,8 @@ class TicTacToeView(ui.View):
                     f"{str(e)}\n\n```\n{traceback.format_exc()}\n```",
                     "ゲームエラー"
                 )
+        else:
+            logger.debug(f"Message {reaction.message.id} not in othello_views")
 
 
 async def setup(bot: commands.Bot):
