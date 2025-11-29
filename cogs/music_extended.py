@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from utils.database import get_database
 from utils.logger import setup_logger
 from utils.helpers import create_error_embed, create_success_embed
+from utils.lyrics import LyricsSearcher
 
 logger = setup_logger(__name__)
 
@@ -24,20 +25,9 @@ logger = setup_logger(__name__)
 load_dotenv()
 GENIUS_API_TOKEN = os.getenv('GENIUS_API_TOKEN')
 
-# Genius APIの初期化（トークンがある場合）
-try:
-    if GENIUS_API_TOKEN and GENIUS_API_TOKEN != 'your_genius_token_here':
-        from lyricsgenius import Genius
-        genius = Genius(GENIUS_API_TOKEN, timeout=10, retries=3)
-        LYRICS_AVAILABLE = True
-    else:
-        genius = None
-        LYRICS_AVAILABLE = False
-        logger.warning("Genius API token not configured - lyrics feature disabled")
-except ImportError:
-    genius = None
-    LYRICS_AVAILABLE = False
-    logger.warning("lyricsgenius not installed - install with: pip install lyricsgenius")
+# 歌詞検索ツールの初期化
+lyrics_searcher = LyricsSearcher(GENIUS_API_TOKEN)
+LYRICS_AVAILABLE = True
 
 # 24/7自動再生セッションの管理
 autoplay_sessions: Dict[int, dict] = {}  # guild_id -> autoplay info
@@ -153,46 +143,21 @@ class MusicExtended(commands.Cog):
         artist: Optional[str] = None
     ):
         """曲の歌詞を表示"""
-        if not LYRICS_AVAILABLE:
-            await interaction.response.send_message(
-                embed=create_error_embed(
-                    "機能が利用できません",
-                    "Genius API トークンが設定されていません。\n"
-                    ".env ファイルに `GENIUS_API_TOKEN` を設定してください。\n\n"
-                    "取得方法: https://genius.com/api-clients"
-                ),
-                ephemeral=True
-            )
-            return
-
         await interaction.response.defer()
 
         try:
             logger.info(f"Fetching lyrics for: {title} by {artist or 'Unknown'}")
 
-            # 歌詞を検索（非同期で実行）
-            loop = asyncio.get_event_loop()
-            song = await loop.run_in_executor(
-                None,
-                lambda: genius.search_song(title, artist)
-            )
+            # 複数のソースから歌詞を検索
+            lyrics_text, source = await lyrics_searcher.search(title, artist)
 
-            if not song:
-                await interaction.followup.send(
-                    embed=create_error_embed(
-                        "歌詞が見つかりません",
-                        f"「{title}」の歌詞が見つかりませんでした。"
-                    )
-                )
-                return
-
-            # 歌詞が長い場合は分割
-            lyrics_text = song.lyrics
             if not lyrics_text:
                 await interaction.followup.send(
                     embed=create_error_embed(
-                        "歌詞が利用できません",
-                        f"「{song.title}」の歌詞が利用できません。"
+                        "歌詞が見つかりません",
+                        f"「{title}」の歌詞がどのソースにも見つかりませんでした。\n"
+                        f"検索フォーム: [Genius](https://genius.com/search) | "
+                        f"[uta-net](https://www.uta-net.com/search/)"
                     )
                 )
                 return
@@ -214,12 +179,11 @@ class MusicExtended(commands.Cog):
 
             # 歌詞を送信（最初のEmbedは情報付き）
             embed = discord.Embed(
-                title=f"🎵 {song.title}",
-                description=f"**アーティスト**: {song.artist}\n\n```\n{chunks[0]}\n```",
-                color=discord.Color.blue(),
-                url=song.url
+                title=f"🎵 {title}",
+                description=f"**アーティスト**: {artist or 'Unknown'}\n\n```\n{chunks[0]}\n```",
+                color=discord.Color.blue()
             )
-            embed.set_footer(text="Powered by Genius")
+            embed.set_footer(text=f"Source: {source}")
             await interaction.followup.send(embed=embed)
 
             # 残りの歌詞を送信
@@ -230,7 +194,7 @@ class MusicExtended(commands.Cog):
                 )
                 await interaction.followup.send(embed=embed)
 
-            logger.info(f"Lyrics sent for: {song.title}")
+            logger.info(f"Lyrics sent for: {title} (source: {source})")
 
         except Exception as e:
             logger.error(f"Error fetching lyrics: {e}")
