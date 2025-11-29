@@ -3,8 +3,9 @@ from discord.ext import commands
 from discord import app_commands, ui
 import asyncio
 from typing import Optional
-from utils.helpers import create_error_embed
+from utils.helpers import create_error_embed, send_error_to_discord
 from utils.logger import setup_logger
+import traceback
 
 logger = setup_logger(__name__)
 
@@ -155,7 +156,14 @@ class Connect4View(ui.View):
                 return
 
             self.game.drop_piece(col)
-            self.game.switch_player()
+
+            # 勝者判定前にプレイヤーを切り替える
+            if self.game.check_winner():
+                self.game.game_over = True
+                self.game_over = True
+            else:
+                self.game.switch_player()
+
             await interaction.response.defer()
 
         return callback
@@ -226,7 +234,14 @@ class Games(commands.Cog):
             await self.game_loop(msg, game, view, interaction.channel_id)
 
         except Exception as e:
-            logger.error(f"Error in connect4 command: {str(e)}")
+            error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
+            logger.error(f"Error in connect4 command: {error_message}")
+            await send_error_to_discord(
+                self.bot,
+                "四目並べコマンドエラー",
+                error_message,
+                "コマンドエラー"
+            )
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=create_error_embed("四目並べエラー", str(e)), ephemeral=True)
 
@@ -245,10 +260,10 @@ class Games(commands.Cog):
 
                 last_displayed_state = current_state
 
-                # 勝者判定
-                if game.check_winner():
-                    winner = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
-                    game.game_over = True
+                # 勝者判定（既に勝利状態）
+                if game.game_over:
+                    # 現在のプレイヤーが勝者（既にswitch前のプレイヤーが勝利ピースを置いた）
+                    winner = game.player1 if game.current_player == Connect4Game.PLAYER2 else game.player2
                     view.game_over = True
 
                     embed = discord.Embed(
@@ -289,7 +304,14 @@ class Games(commands.Cog):
                     await message.edit(embed=embed, view=view)
 
             except Exception as e:
-                logger.error(f"Error in game loop: {str(e)}")
+                error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
+                logger.error(f"Error in game loop: {error_message}")
+                await send_error_to_discord(
+                    self.bot,
+                    "四目並べゲームループエラー",
+                    error_message,
+                    "ゲームエラー"
+                )
                 break
 
         # ゲーム終了時にアクティブゲームから削除

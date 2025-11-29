@@ -6,6 +6,7 @@ import aiohttp
 import math
 from utils.helpers import create_error_embed, create_success_embed
 from utils.logger import setup_logger
+from utils.ping_tracker import ping_tracker
 
 logger = setup_logger(__name__)
 
@@ -250,21 +251,58 @@ class Entertainment(commands.Cog):
             logger.error(f"Error in hoplite slash command: {str(e)}")
             await interaction.response.send_message(embed=create_error_embed("チーム割り当てエラー", str(e)), ephemeral=True)
 
-    @app_commands.command(name='ping', description='ボットのピングを表示します')
+    @app_commands.command(name='ping', description='ボットのピングを表示して、グラフを生成します')
     async def ping(self, interaction: discord.Interaction):
-        """ボットのピングを表示します"""
+        """ボットのピングを表示してグラフを生成します"""
         try:
+            await interaction.response.defer()
+
             latency = round(self.bot.latency * 1000)
+            ping_tracker.add_ping(latency)
+
+            # Stats
+            avg_ping = ping_tracker.get_average_ping()
+            min_ping = ping_tracker.get_min_ping()
+            max_ping = ping_tracker.get_max_ping()
+            sample_count = len(ping_tracker.pings)
+
+            # Create embed
             embed = discord.Embed(
-                title="🏓 Ping",
-                description=f"**ボットのレイテンシ:** {latency}ms",
+                title="🏓 Ping Statistics",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
-            await interaction.response.send_message(embed=embed)
+            embed.add_field(
+                name="Current Latency",
+                value=f"**{latency}ms**",
+                inline=True
+            )
+            embed.add_field(
+                name="Average Latency",
+                value=f"**{avg_ping:.0f}ms**",
+                inline=True
+            )
+            embed.add_field(
+                name="Min/Max",
+                value=f"**{min_ping}ms** / **{max_ping}ms**",
+                inline=True
+            )
+            embed.add_field(
+                name="Samples",
+                value=f"**{sample_count}** measurements",
+                inline=True
+            )
+
+            # Generate graph
+            graph_buffer = ping_tracker.generate_graph()
+            file = discord.File(graph_buffer, filename='ping_graph.png')
+            embed.set_image(url='attachment://ping_graph.png')
+
+            await interaction.followup.send(embed=embed, file=file)
+
         except Exception as e:
             logger.error(f"Error in ping command: {str(e)}")
-            await interaction.response.send_message(embed=create_error_embed("ピング取得に失敗しました", str(e)), ephemeral=True)
+            await interaction.followup.send(embed=create_error_embed("ピング取得に失敗しました", str(e)), ephemeral=True)
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(Entertainment(bot))

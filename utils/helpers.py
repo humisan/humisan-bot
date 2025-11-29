@@ -1,6 +1,10 @@
 import discord
 from discord.ext import commands
 from typing import Optional
+import traceback
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 async def get_member(ctx: commands.Context, member_id_or_name: str) -> Optional[discord.Member]:
     """Get a member by ID or mention"""
@@ -53,3 +57,22 @@ def create_success_embed(title: str, description: str = "") -> discord.Embed:
         timestamp=discord.utils.utcnow()
     )
     return embed
+
+async def send_error_to_discord(bot: commands.Bot, error_title: str, error_message: str, error_type: str = "エラー"):
+    """Send error message to Discord error log channel and console"""
+    try:
+        # Console に出力
+        logger.error(f"{error_type} - {error_title}: {error_message}")
+
+        # Discord のエラーログチャンネルに送信
+        error_channel_id = int(__import__('os').getenv('ERROR_LOG_CHANNEL_ID', 0))
+        if error_channel_id:
+            try:
+                error_channel = bot.get_channel(error_channel_id)
+                if error_channel:
+                    embed = create_error_embed(error_title, error_message[:4096])  # Discord の文字制限に対応
+                    await error_channel.send(embed=embed)
+            except Exception as channel_error:
+                logger.error(f"Failed to send error to Discord channel: {str(channel_error)}")
+    except Exception as e:
+        logger.error(f"Failed to send error notification: {str(e)}")
