@@ -179,6 +179,7 @@ class Games(commands.Cog):
         self.bot = bot
         self.active_games = {}  # channel_id -> list of games
         self.game_timeouts = {}  # game_id -> timeout task
+        self.othello_views = {}  # message_id -> OthelloView
 
     def is_game_running(self, channel_id: int, game_type: str = None) -> bool:
         """このチャンネルでゲーム中か判定"""
@@ -297,9 +298,16 @@ class Games(commands.Cog):
                     embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
                     await msg.edit(embed=embed, view=view)
 
-            view = OthelloView(game, on_move)
-            await interaction.response.send_message(embed=embed, view=view)
+            view = OthelloView(game, on_move, timeout=300)
+            await interaction.response.send_message(embed=embed)
             msg = await interaction.original_response()
+
+            # メッセージを設定してリアクションを追加
+            view.message = msg
+            await view.setup_reactions()
+
+            # viewを保存してリアクションハンドラで使用できるようにする
+            self.othello_views[msg.id] = view
 
             # ゲームIDを生成してタイムアウトを設定
             game_id = self.add_game(interaction.channel_id, 'othello', game, msg.id)
@@ -367,6 +375,9 @@ class Games(commands.Cog):
         finally:
             # ゲーム終了時にアクティブゲームから削除
             self.remove_game(channel_id, game_id)
+            # ビューをクリーンアップ
+            if message.id in self.othello_views:
+                del self.othello_views[message.id]
 
     @app_commands.command(name='tictactoe', description='マルバツゲーム（TicTacToe）を開始します')
     @app_commands.describe(opponent='対戦相手のメンション')
@@ -750,111 +761,99 @@ class OthelloGame:
         return display
 
 
-class OthelloMoveModal(ui.Modal, title="オセロ - 手を入力"):
-    """オセロの手を入力するモーダル"""
+class OthelloView(ui.View):
+    """オセロ用ビュー - リアクション投票で手を入力"""
 
-    position = ui.TextInput(
-        label="座標を入力 (例: a1, h8)",
-        placeholder="列(a-h)と行(1-8) 例: c4",
-        min_length=2,
-        max_length=2
-    )
+    COLUMN_EMOJIS = ["🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭"]  # a-h
+    ROW_EMOJIS = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]  # 1-8
 
-    def __init__(self, game: 'OthelloGame', on_move_callback):
-        super().__init__()
+    def __init__(self, game: 'OthelloGame', on_move_callback, message: discord.Message = None, timeout: int = 300):
+        super().__init__(timeout=timeout)
         self.game = game
+        self.game_over = False
         self.on_move_callback = on_move_callback
+        self.message = message
+        self.selected_col = None
+        self.selected_row = None
 
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            move_input = self.position.value.lower().strip()
+    async def setup_reactions(self):
+        """リアクションを設定（メッセージが必要）"""
+        if not self.message:
+            return
 
-            if len(move_input) != 2:
-                await interaction.response.send_message(
-                    "❌ 形式が正しくありません。例: c4",
-                    ephemeral=True
-                )
-                return
-
-            col_char, row_char = move_input[0], move_input[1]
-
-            # 列を数値に変換 (a=0, b=1, ... h=7)
-            if col_char < 'a' or col_char > 'h':
-                await interaction.response.send_message(
-                    "❌ 列は a-h で指定してください",
-                    ephemeral=True
-                )
-                return
-
-            col = ord(col_char) - ord('a')
-
-            # 行を数値に変換 (1=0, 2=1, ... 8=7)
+        # 列のリアクションを追加
+        for emoji in self.COLUMN_EMOJIS:
             try:
-                row = int(row_char) - 1
-                if row < 0 or row > 7:
-                    raise ValueError
-            except ValueError:
-                await interaction.response.send_message(
-                    "❌ 行は 1-8 で指定してください",
-                    ephemeral=True
-                )
-                return
+                await self.message.add_reaction(emoji)
+            except discord.errors.HTTPException:
+                await asyncio.sleep(0.2)
+
+        # 行のリアクションを追加
+        for emoji in self.ROW_EMOJIS:
+            try:
+                await self.message.add_reaction(emoji)
+            except discord.errors.HTTPException:
+                await asyncio.sleep(0.2)
+
+        # キャンセルボタン
+        try:
+            await self.message.add_reaction("❌")
+        except discord.errors.HTTPException:
+            pass
+
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+        """リアクション追加時の処理"""
+        if user.bot or self.game_over:
+            return
+
+        # 現在のプレイヤーの確認
+        current_player_user = self.game.player1 if self.game.current_player == OthelloGame.BLACK else self.game.player2
+        if user.id != current_player_user.id:
+            await reaction.remove(user)
+            return
+
+        emoji = reaction.emoji
+
+        # キャンセル
+        if emoji == "❌":
+            self.selected_col = None
+            self.selected_row = None
+            await reaction.remove(user)
+            return
+
+        # 列の選択
+        if emoji in self.COLUMN_EMOJIS:
+            self.selected_col = self.COLUMN_EMOJIS.index(emoji)
+            await reaction.remove(user)
+
+        # 行の選択
+        elif emoji in self.ROW_EMOJIS:
+            self.selected_row = self.ROW_EMOJIS.index(emoji)
+            await reaction.remove(user)
+
+        # 列と行の両方が選択されたら手を実行
+        if self.selected_col is not None and self.selected_row is not None:
+            row = self.selected_row
+            col = self.selected_col
 
             # 有効な手か確認
             valid_moves = self.game.get_valid_moves()
             if (row, col) not in valid_moves:
-                valid_moves_str = ", ".join([f"{chr(c+ord('a'))}{r+1}" for r, c in valid_moves[:5]])
-                await interaction.response.send_message(
-                    f"❌ その位置には置けません\n有効な手: {valid_moves_str}...",
-                    ephemeral=True
-                )
+                # 無効な手の場合、選択をリセット
+                self.selected_col = None
+                self.selected_row = None
                 return
 
             # 手を実行
             self.game.place_piece(row, col)
             self.game.switch_player()
 
-            await interaction.response.defer()
+            # コールバックを実行（盤面を更新）
             await self.on_move_callback()
 
-        except Exception as e:
-            logger.error(f"Error in othello modal: {str(e)}")
-            await interaction.response.send_message(
-                f"❌ エラーが発生しました: {str(e)}",
-                ephemeral=True
-            )
-
-
-class OthelloView(ui.View):
-    """オセロ用ビュー - 手を入力するボタンのみ"""
-
-    def __init__(self, game: 'OthelloGame', on_move_callback, timeout: int = 300):
-        super().__init__(timeout=timeout)
-        self.game = game
-        self.game_over = False
-        self.on_move_callback = on_move_callback
-
-    @ui.button(label="手を入力", style=discord.ButtonStyle.primary)
-    async def move_button(self, interaction: discord.Interaction, button: ui.Button):
-        current_player_user = self.game.player1 if self.game.current_player == OthelloGame.BLACK else self.game.player2
-
-        if interaction.user.id != current_player_user.id:
-            await interaction.response.send_message(
-                "あなたのターンではありません",
-                ephemeral=True
-            )
-            return
-
-        if self.game_over:
-            await interaction.response.send_message(
-                "ゲームは既に終了しています",
-                ephemeral=True
-            )
-            return
-
-        # モーダルを表示
-        modal = OthelloMoveModal(self.game, self.on_move_callback)
-        await interaction.response.send_modal(modal)
+            # 選択をリセット
+            self.selected_col = None
+            self.selected_row = None
 
     async def on_timeout(self):
         self.game_over = True
@@ -987,6 +986,26 @@ class TicTacToeView(ui.View):
 
     async def on_timeout(self):
         self.game_over = True
+
+    @commands.Cog.listener()
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User):
+        """リアクション追加イベント"""
+        if user.bot:
+            return
+
+        # Othelloゲームのリアクション処理
+        if reaction.message.id in self.othello_views:
+            view = self.othello_views[reaction.message.id]
+            try:
+                await view.on_reaction_add(reaction, user)
+            except Exception as e:
+                logger.error(f"Error handling Othello reaction: {str(e)}")
+                await send_error_to_discord(
+                    self.bot,
+                    "オセロリアクションエラー",
+                    f"{str(e)}\n\n```\n{traceback.format_exc()}\n```",
+                    "ゲームエラー"
+                )
 
 
 async def setup(bot: commands.Bot):
