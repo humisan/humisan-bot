@@ -117,48 +117,20 @@ async def load_cogs():
 @bot.event
 async def on_ready():
     """ボットが起動した時のイベント"""
-    logger.info("=" * 60)
-    logger.info(f"Bot Version/Commit: {get_git_info()}")
-    logger.info("=" * 60)
-    logger.info(f'{bot.user} has connected to Discord!')
-    logger.info(f'Bot is ready! Currently in {len(bot.guilds)} guilds.')
+    logger.info(f'{bot.user} is ready!')
 
     # ボットのステータスを設定（常に idle を維持）
     activity = discord.Activity(type=discord.ActivityType.watching, name="/help で コマンド一覧を表示")
     await bot.change_presence(status=discord.Status.idle, activity=activity)
-    logger.info("Bot status set to idle (always)")
 
     try:
-        logger.info("Syncing application commands (Global)...")
         synced = await bot.tree.sync()
-        logger.info(f"Successfully synced {len(synced)} global application command(s)")
-
-        if synced:
-            logger.info("Synced commands:")
-            for cmd in synced:
-                logger.info(f"  - /{cmd.name}")
-        else:
-            logger.warning("No commands were synced!")
-
     except Exception as e:
         logger.error(f"Failed to sync commands: {e}")
 
     # Database migration on first startup
     try:
-        logger.info("Running database migration from JSON files...")
         migration_report = run_migration(db)
-        if migration_report:
-            logger.info("=" * 50)
-            logger.info("Database Migration Report:")
-            logger.info("=" * 50)
-            for key, value in migration_report.items():
-                if isinstance(value, dict):
-                    logger.info(f"{key}:")
-                    for sub_key, sub_value in value.items():
-                        logger.info(f"  {sub_key}: {sub_value}")
-                else:
-                    logger.info(f"{key}: {value}")
-            logger.info("=" * 50)
     except Exception as e:
         logger.error(f"Failed to run migration: {e}")
 
