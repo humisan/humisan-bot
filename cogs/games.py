@@ -177,11 +177,60 @@ class Games(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.active_games = {}
+        self.active_games = {}  # channel_id -> list of games
+        self.game_timeouts = {}  # game_id -> timeout task
 
-    def is_game_running(self, channel_id: int) -> bool:
+    def is_game_running(self, channel_id: int, game_type: str = None) -> bool:
         """このチャンネルでゲーム中か判定"""
-        return channel_id in self.active_games
+        if channel_id not in self.active_games:
+            return False
+
+        if game_type is None:
+            return len(self.active_games[channel_id]) > 0
+
+        return any(game['type'] == game_type for game in self.active_games[channel_id])
+
+    def add_game(self, channel_id: int, game_type: str, game: object, message_id: int) -> str:
+        """ゲームを追加してIDを返す"""
+        if channel_id not in self.active_games:
+            self.active_games[channel_id] = []
+
+        game_id = f"{channel_id}_{game_type}_{len(self.active_games[channel_id])}"
+        self.active_games[channel_id].append({
+            'id': game_id,
+            'type': game_type,
+            'game': game,
+            'message_id': message_id
+        })
+        return game_id
+
+    def remove_game(self, channel_id: int, game_id: str) -> None:
+        """ゲームを削除"""
+        if channel_id in self.active_games:
+            self.active_games[channel_id] = [g for g in self.active_games[channel_id] if g['id'] != game_id]
+            if not self.active_games[channel_id]:
+                del self.active_games[channel_id]
+
+        if game_id in self.game_timeouts:
+            task = self.game_timeouts[game_id]
+            if not task.done():
+                task.cancel()
+            del self.game_timeouts[game_id]
+
+    async def set_game_timeout(self, channel_id: int, game_id: str, timeout_seconds: int = 300) -> None:
+        """ゲームのタイムアウトを設定"""
+        async def timeout_handler():
+            try:
+                await asyncio.sleep(timeout_seconds)
+                self.remove_game(channel_id, game_id)
+                logger.info(f"Game {game_id} timed out after {timeout_seconds} seconds")
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error in game timeout handler: {str(e)}")
+
+        task = asyncio.create_task(timeout_handler())
+        self.game_timeouts[game_id] = task
 
     @app_commands.command(name='othello', description='オセロ/リバーシを開始します')
     @app_commands.describe(opponent='対戦相手のメンション')
@@ -206,17 +255,7 @@ class Games(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            if self.is_game_running(interaction.channel_id):
-                embed = discord.Embed(
-                    title="❌ エラー",
-                    description="このチャンネルで既にゲーム中です",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
             game = OthelloGame(interaction.user, opponent)
-            self.active_games[interaction.channel_id] = game
 
             black_score, white_score = game.get_score()
             embed = discord.Embed(
@@ -226,14 +265,18 @@ class Games(commands.Cog):
                 timestamp=discord.utils.utcnow()
             )
             embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
-            embed.set_footer(text=f"次のターン: {interaction.user.name} (⚫黒)")
+            embed.set_footer(text=f"次のターン: {interaction.user.name} (⚫黒) | 制限時間: 5分")
 
             view = OthelloView(game)
             await interaction.response.send_message(embed=embed, view=view)
             msg = await interaction.original_response()
 
+            # ゲームIDを生成してタイムアウトを設定
+            game_id = self.add_game(interaction.channel_id, 'othello', game, msg.id)
+            await self.set_game_timeout(interaction.channel_id, game_id, timeout_seconds=300)
+
             # ゲームループ
-            await self.othello_game_loop(msg, game, view, interaction.channel_id)
+            await self.othello_game_loop(msg, game, view, interaction.channel_id, game_id)
 
         except Exception as e:
             error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
@@ -247,69 +290,69 @@ class Games(commands.Cog):
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=create_error_embed("オセロエラー", str(e)), ephemeral=True)
 
-    async def othello_game_loop(self, message: discord.Message, game: OthelloGame, view: OthelloView, channel_id: int):
+    async def othello_game_loop(self, message: discord.Message, game: OthelloGame, view: OthelloView, channel_id: int, game_id: str):
         """オセロゲームループ"""
-        while not game.game_over and not view.game_over:
-            try:
-                await asyncio.sleep(0.5)
+        try:
+            while not game.game_over and not view.game_over:
+                try:
+                    await asyncio.sleep(0.5)
 
-                # ゲーム終了判定
-                if game.check_game_over():
+                    # ゲーム終了判定
+                    if game.check_game_over():
+                        black_score, white_score = game.get_score()
+                        winner = "⚫黒" if black_score > white_score else ("⚪白" if white_score > black_score else "引き分け")
+
+                        embed = discord.Embed(
+                            title="🎉 ゲーム終了",
+                            description=f"{winner}の勝利！\n\n{game.get_board_display()}",
+                            color=discord.Color.gold(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        embed.add_field(name="最終スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
+                        await message.edit(embed=embed, view=None)
+                        break
+
+                    # 有効な手がない場合
+                    valid_moves = game.get_valid_moves()
+                    if not valid_moves:
+                        current_player_name = game.player1.name if game.current_player == OthelloGame.BLACK else game.player2.name
+                        embed = discord.Embed(
+                            title="📢 パス",
+                            description=f"{current_player_name}は有効な手がないため、パスします。",
+                            color=discord.Color.orange()
+                        )
+                        await message.channel.send(embed=embed)
+                        game.switch_player()
+                        continue
+
+                    # 盤面更新
+                    current_player = game.player1 if game.current_player == OthelloGame.BLACK else game.player2
+                    emoji = "⚫" if game.current_player == OthelloGame.BLACK else "⚪"
                     black_score, white_score = game.get_score()
-                    winner = "⚫黒" if black_score > white_score else ("⚪白" if white_score > black_score else "引き分け")
 
                     embed = discord.Embed(
-                        title="🎉 ゲーム終了",
-                        description=f"{winner}の勝利！\n\n{game.get_board_display()}",
-                        color=discord.Color.gold(),
+                        title="⚫⚪ オセロ/リバーシ",
+                        description=f"{game.player1.mention} (⚫黒) vs {game.player2.mention} (⚪白)\n\n{game.get_board_display()}",
+                        color=discord.Color.blue(),
                         timestamp=discord.utils.utcnow()
                     )
-                    embed.add_field(name="最終スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
-                    await message.edit(embed=embed, view=None)
-                    break
+                    embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
+                    embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
+                    await message.edit(embed=embed, view=view)
 
-                # 有効な手がない場合
-                valid_moves = game.get_valid_moves()
-                if not valid_moves:
-                    current_player_name = game.player1.name if game.current_player == OthelloGame.BLACK else game.player2.name
-                    embed = discord.Embed(
-                        title="📢 パス",
-                        description=f"{current_player_name}は有効な手がないため、パスします。",
-                        color=discord.Color.orange()
+                except Exception as e:
+                    error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
+                    logger.error(f"Error in othello game loop: {error_message}")
+                    await send_error_to_discord(
+                        self.bot,
+                        "オセロゲームループエラー",
+                        error_message,
+                        "ゲームエラー"
                     )
-                    await message.channel.send(embed=embed)
-                    game.switch_player()
-                    continue
-
-                # 盤面更新
-                current_player = game.player1 if game.current_player == OthelloGame.BLACK else game.player2
-                emoji = "⚫" if game.current_player == OthelloGame.BLACK else "⚪"
-                black_score, white_score = game.get_score()
-
-                embed = discord.Embed(
-                    title="⚫⚪ オセロ/リバーシ",
-                    description=f"{game.player1.mention} (⚫黒) vs {game.player2.mention} (⚪白)\n\n{game.get_board_display()}",
-                    color=discord.Color.blue(),
-                    timestamp=discord.utils.utcnow()
-                )
-                embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
-                embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                await message.edit(embed=embed, view=view)
-
-            except Exception as e:
-                error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
-                logger.error(f"Error in othello game loop: {error_message}")
-                await send_error_to_discord(
-                    self.bot,
-                    "オセロゲームループエラー",
-                    error_message,
-                    "ゲームエラー"
-                )
-                break
-
-        # ゲーム終了時にアクティブゲームから削除
-        if channel_id in self.active_games:
-            del self.active_games[channel_id]
+                    break
+        finally:
+            # ゲーム終了時にアクティブゲームから削除
+            self.remove_game(channel_id, game_id)
 
     @app_commands.command(name='tictactoe', description='マルバツゲーム（TicTacToe）を開始します')
     @app_commands.describe(opponent='対戦相手のメンション')
@@ -334,17 +377,7 @@ class Games(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            if self.is_game_running(interaction.channel_id):
-                embed = discord.Embed(
-                    title="❌ エラー",
-                    description="このチャンネルで既にゲーム中です",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
             game = TicTacToeGame(interaction.user, opponent)
-            self.active_games[interaction.channel_id] = game
 
             embed = discord.Embed(
                 title="❌⭕ マルバツゲーム",
@@ -352,14 +385,18 @@ class Games(commands.Cog):
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.set_footer(text=f"次のターン: {interaction.user.name} (❌)")
+            embed.set_footer(text=f"次のターン: {interaction.user.name} (❌) | 制限時間: 5分")
 
             view = TicTacToeView(game)
             await interaction.response.send_message(embed=embed, view=view)
             msg = await interaction.original_response()
 
+            # ゲームIDを生成してタイムアウトを設定
+            game_id = self.add_game(interaction.channel_id, 'tictactoe', game, msg.id)
+            await self.set_game_timeout(interaction.channel_id, game_id, timeout_seconds=300)
+
             # ゲームループ
-            await self.tictactoe_game_loop(msg, game, view, interaction.channel_id)
+            await self.tictactoe_game_loop(msg, game, view, interaction.channel_id, game_id)
 
         except Exception as e:
             error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
@@ -373,68 +410,68 @@ class Games(commands.Cog):
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=create_error_embed("マルバツゲームエラー", str(e)), ephemeral=True)
 
-    async def tictactoe_game_loop(self, message: discord.Message, game: TicTacToeGame, view: TicTacToeView, channel_id: int):
+    async def tictactoe_game_loop(self, message: discord.Message, game: TicTacToeGame, view: TicTacToeView, channel_id: int, game_id: str):
         """マルバツゲームループ"""
-        while not game.game_over and not view.game_over:
-            try:
-                await asyncio.sleep(0.5)
+        try:
+            while not game.game_over and not view.game_over:
+                try:
+                    await asyncio.sleep(0.5)
 
-                # 勝者判定（既に勝利状態）
-                if game.game_over:
-                    winner = game.player1 if game.winner == TicTacToeGame.X else game.player2
-                    view.game_over = True
+                    # 勝者判定（既に勝利状態）
+                    if game.game_over:
+                        winner = game.player1 if game.winner == TicTacToeGame.X else game.player2
+                        view.game_over = True
 
-                    embed = discord.Embed(
-                        title="🎉 ゲーム終了",
-                        description=f"{winner.mention} の勝利！\n\n{game.get_board_display()}",
-                        color=discord.Color.gold(),
-                        timestamp=discord.utils.utcnow()
+                        embed = discord.Embed(
+                            title="🎉 ゲーム終了",
+                            description=f"{winner.mention} の勝利！\n\n{game.get_board_display()}",
+                            color=discord.Color.gold(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        embed.set_footer(text="おめでとうございます！")
+                        await message.edit(embed=embed, view=None)
+                        break
+
+                    elif game.is_board_full():
+                        game.game_over = True
+                        view.game_over = True
+
+                        embed = discord.Embed(
+                            title="🤝 ゲーム終了",
+                            description=f"盤面が満杯になりました。引き分けです。\n\n{game.get_board_display()}",
+                            color=discord.Color.greyple(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        await message.edit(embed=embed, view=None)
+                        break
+
+                    else:
+                        # 盤面を更新
+                        current_player = game.player1 if game.current_player == TicTacToeGame.X else game.player2
+                        emoji = "❌" if game.current_player == TicTacToeGame.X else "⭕"
+
+                        embed = discord.Embed(
+                            title="❌⭕ マルバツゲーム",
+                            description=f"{game.player1.mention} (❌) vs {game.player2.mention} (⭕)\n\n{game.get_board_display()}",
+                            color=discord.Color.blue(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
+                        await message.edit(embed=embed, view=view)
+
+                except Exception as e:
+                    error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
+                    logger.error(f"Error in tictactoe game loop: {error_message}")
+                    await send_error_to_discord(
+                        self.bot,
+                        "マルバツゲームループエラー",
+                        error_message,
+                        "ゲームエラー"
                     )
-                    embed.set_footer(text="おめでとうございます！")
-                    await message.edit(embed=embed, view=None)
                     break
-
-                elif game.is_board_full():
-                    game.game_over = True
-                    view.game_over = True
-
-                    embed = discord.Embed(
-                        title="🤝 ゲーム終了",
-                        description=f"盤面が満杯になりました。引き分けです。\n\n{game.get_board_display()}",
-                        color=discord.Color.greyple(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    await message.edit(embed=embed, view=None)
-                    break
-
-                else:
-                    # 盤面を更新
-                    current_player = game.player1 if game.current_player == TicTacToeGame.X else game.player2
-                    emoji = "❌" if game.current_player == TicTacToeGame.X else "⭕"
-
-                    embed = discord.Embed(
-                        title="❌⭕ マルバツゲーム",
-                        description=f"{game.player1.mention} (❌) vs {game.player2.mention} (⭕)\n\n{game.get_board_display()}",
-                        color=discord.Color.blue(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                    await message.edit(embed=embed, view=view)
-
-            except Exception as e:
-                error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
-                logger.error(f"Error in tictactoe game loop: {error_message}")
-                await send_error_to_discord(
-                    self.bot,
-                    "マルバツゲームループエラー",
-                    error_message,
-                    "ゲームエラー"
-                )
-                break
-
-        # ゲーム終了時にアクティブゲームから削除
-        if channel_id in self.active_games:
-            del self.active_games[channel_id]
+        finally:
+            # ゲーム終了時にアクティブゲームから削除
+            self.remove_game(channel_id, game_id)
 
     @app_commands.command(name='connect4', description='四目並べを開始します')
     @app_commands.describe(opponent='対戦相手のメンション')
@@ -459,17 +496,7 @@ class Games(commands.Cog):
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
 
-            if self.is_game_running(interaction.channel_id):
-                embed = discord.Embed(
-                    title="❌ エラー",
-                    description="このチャンネルで既にゲーム中です",
-                    color=discord.Color.red()
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-                return
-
             game = Connect4Game(interaction.user, opponent)
-            self.active_games[interaction.channel_id] = game
 
             embed = discord.Embed(
                 title="🎮 四目並べ",
@@ -477,14 +504,18 @@ class Games(commands.Cog):
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
-            embed.set_footer(text=f"次のターン: {interaction.user.name} ({game.P1_EMOJI})")
+            embed.set_footer(text=f"次のターン: {interaction.user.name} ({game.P1_EMOJI}) | 制限時間: 5分")
 
             view = Connect4View(game)
             await interaction.response.send_message(embed=embed, view=view)
             msg = await interaction.original_response()
 
+            # ゲームIDを生成してタイムアウトを設定
+            game_id = self.add_game(interaction.channel_id, 'connect4', game, msg.id)
+            await self.set_game_timeout(interaction.channel_id, game_id, timeout_seconds=300)
+
             # ゲームループ
-            await self.game_loop(msg, game, view, interaction.channel_id)
+            await self.game_loop(msg, game, view, interaction.channel_id, game_id)
 
         except Exception as e:
             error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
@@ -498,78 +529,78 @@ class Games(commands.Cog):
             if not interaction.response.is_done():
                 await interaction.response.send_message(embed=create_error_embed("四目並べエラー", str(e)), ephemeral=True)
 
-    async def game_loop(self, message: discord.Message, game: Connect4Game, view: Connect4View, channel_id: int):
+    async def game_loop(self, message: discord.Message, game: Connect4Game, view: Connect4View, channel_id: int, game_id: str):
         """ゲームループ"""
         last_displayed_state = str(game.board)
 
-        while not game.game_over and not view.game_over:
-            try:
-                await asyncio.sleep(0.5)
+        try:
+            while not game.game_over and not view.game_over:
+                try:
+                    await asyncio.sleep(0.5)
 
-                # ゲーム状態が変わっていなければスキップ
-                current_state = str(game.board)
-                if current_state == last_displayed_state:
-                    continue
+                    # ゲーム状態が変わっていなければスキップ
+                    current_state = str(game.board)
+                    if current_state == last_displayed_state:
+                        continue
 
-                last_displayed_state = current_state
+                    last_displayed_state = current_state
 
-                # 勝者判定（既に勝利状態）
-                if game.game_over:
-                    # 現在のプレイヤーが勝者（既にswitch前のプレイヤーが勝利ピースを置いた）
-                    winner = game.player1 if game.current_player == Connect4Game.PLAYER2 else game.player2
-                    view.game_over = True
+                    # 勝者判定（既に勝利状態）
+                    if game.game_over:
+                        # 現在のプレイヤーが勝者（既にswitch前のプレイヤーが勝利ピースを置いた）
+                        winner = game.player1 if game.current_player == Connect4Game.PLAYER2 else game.player2
+                        view.game_over = True
 
-                    embed = discord.Embed(
-                        title="🎉 ゲーム終了",
-                        description=f"{winner.mention} の勝利！\n\n{game.get_board_display()}",
-                        color=discord.Color.gold(),
-                        timestamp=discord.utils.utcnow()
+                        embed = discord.Embed(
+                            title="🎉 ゲーム終了",
+                            description=f"{winner.mention} の勝利！\n\n{game.get_board_display()}",
+                            color=discord.Color.gold(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        embed.set_footer(text="おめでとうございます！")
+                        await message.edit(embed=embed, view=None)
+                        break
+
+                    elif game.is_board_full():
+                        game.game_over = True
+                        view.game_over = True
+
+                        embed = discord.Embed(
+                            title="🤝 ゲーム終了",
+                            description=f"盤面が満杯になりました。引き分けです。\n\n{game.get_board_display()}",
+                            color=discord.Color.greyple(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        await message.edit(embed=embed, view=None)
+                        break
+
+                    else:
+                        # 盤面を更新
+                        current_player = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
+                        emoji = game.P1_EMOJI if game.current_player == Connect4Game.PLAYER1 else game.P2_EMOJI
+
+                        embed = discord.Embed(
+                            title="🎮 四目並べ",
+                            description=f"{game.player1.mention} vs {game.player2.mention}\n\n{game.get_board_display()}",
+                            color=discord.Color.blue(),
+                            timestamp=discord.utils.utcnow()
+                        )
+                        embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
+                        await message.edit(embed=embed, view=view)
+
+                except Exception as e:
+                    error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
+                    logger.error(f"Error in game loop: {error_message}")
+                    await send_error_to_discord(
+                        self.bot,
+                        "四目並べゲームループエラー",
+                        error_message,
+                        "ゲームエラー"
                     )
-                    embed.set_footer(text="おめでとうございます！")
-                    await message.edit(embed=embed, view=None)
                     break
-
-                elif game.is_board_full():
-                    game.game_over = True
-                    view.game_over = True
-
-                    embed = discord.Embed(
-                        title="🤝 ゲーム終了",
-                        description=f"盤面が満杯になりました。引き分けです。\n\n{game.get_board_display()}",
-                        color=discord.Color.greyple(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    await message.edit(embed=embed, view=None)
-                    break
-
-                else:
-                    # 盤面を更新
-                    current_player = game.player1 if game.current_player == Connect4Game.PLAYER1 else game.player2
-                    emoji = game.P1_EMOJI if game.current_player == Connect4Game.PLAYER1 else game.P2_EMOJI
-
-                    embed = discord.Embed(
-                        title="🎮 四目並べ",
-                        description=f"{game.player1.mention} vs {game.player2.mention}\n\n{game.get_board_display()}",
-                        color=discord.Color.blue(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                    await message.edit(embed=embed, view=view)
-
-            except Exception as e:
-                error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
-                logger.error(f"Error in game loop: {error_message}")
-                await send_error_to_discord(
-                    self.bot,
-                    "四目並べゲームループエラー",
-                    error_message,
-                    "ゲームエラー"
-                )
-                break
-
-        # ゲーム終了時にアクティブゲームから削除
-        if channel_id in self.active_games:
-            del self.active_games[channel_id]
+        finally:
+            # ゲーム終了時にアクティブゲームから削除
+            self.remove_game(channel_id, game_id)
 
 
 class OthelloGame:
