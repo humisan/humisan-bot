@@ -732,13 +732,13 @@ class OthelloGame:
 
     def get_board_display(self) -> str:
         """盤面を表示文字列に変換"""
-        col_letters = ["a", "b", "c", "d", "e", "f", "g", "h"]
+        col_emojis = ["🇦", "🇧", "🇨", "🇩", "🇪", "🇫", "🇬", "🇭"]
         row_nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
 
         # ヘッダー行（列のラベル）
         display = "  "
-        for letter in col_letters:
-            display += letter + " "
+        for emoji in col_emojis:
+            display += emoji
         display += "\n"
 
         for row in range(self.ROWS):
