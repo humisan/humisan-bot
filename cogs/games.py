@@ -304,10 +304,23 @@ class Games(commands.Cog):
 
             # メッセージを設定してリアクションを追加
             view.message = msg
-            await view.setup_reactions()
 
             # viewを保存してリアクションハンドラで使用できるようにする
             self.othello_views[msg.id] = view
+
+            # リアクションを追加
+            try:
+                await view.setup_reactions()
+                logger.info(f"Othello reactions added for message {msg.id}")
+            except Exception as e:
+                error_msg = f"Failed to add reactions: {str(e)}\n\n```\n{traceback.format_exc()}\n```"
+                logger.error(f"Error adding Othello reactions: {error_msg}")
+                await send_error_to_discord(
+                    self.bot,
+                    "オセロリアクション追加エラー",
+                    error_msg,
+                    "ゲームエラー"
+                )
 
             # ゲームIDを生成してタイムアウトを設定
             game_id = self.add_game(interaction.channel_id, 'othello', game, msg.id)
@@ -743,8 +756,14 @@ class OthelloGame:
 
     def get_board_display(self) -> str:
         """盤面を表示文字列に変換"""
-        display = "  1️⃣2️⃣3️⃣4️⃣5️⃣6️⃣7️⃣8️⃣\n"
+        col_letters = ["a", "b", "c", "d", "e", "f", "g", "h"]
         row_nums = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣"]
+
+        # ヘッダー行（列のラベル）
+        display = "  "
+        for letter in col_letters:
+            display += letter + " "
+        display += "\n"
 
         for row in range(self.ROWS):
             display += row_nums[row]
