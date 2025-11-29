@@ -265,9 +265,39 @@ class Games(commands.Cog):
                 timestamp=discord.utils.utcnow()
             )
             embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
+            valid_moves = game.get_valid_moves()
+            embed.add_field(
+                name="有効な手",
+                value=", ".join([f"{chr(c+ord('a'))}{r+1}" for r, c in valid_moves]) or "なし",
+                inline=False
+            )
             embed.set_footer(text=f"次のターン: {interaction.user.name} (⚫黒) | 制限時間: 5分")
 
-            view = OthelloView(game)
+            msg = None
+            async def on_move():
+                nonlocal msg
+                if msg:
+                    black_score, white_score = game.get_score()
+                    current_player = game.player1 if game.current_player == OthelloGame.BLACK else game.player2
+                    emoji = "⚫" if game.current_player == OthelloGame.BLACK else "⚪"
+                    valid_moves = game.get_valid_moves()
+
+                    embed = discord.Embed(
+                        title="⚫⚪ オセロ/リバーシ",
+                        description=f"{game.player1.mention} (⚫黒) vs {game.player2.mention} (⚪白)\n\n{game.get_board_display()}",
+                        color=discord.Color.blue(),
+                        timestamp=discord.utils.utcnow()
+                    )
+                    embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
+                    embed.add_field(
+                        name="有効な手",
+                        value=", ".join([f"{chr(c+ord('a'))}{r+1}" for r, c in valid_moves]) or "なし",
+                        inline=False
+                    )
+                    embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
+                    await msg.edit(embed=embed, view=view)
+
+            view = OthelloView(game, on_move)
             await interaction.response.send_message(embed=embed, view=view)
             msg = await interaction.original_response()
 
@@ -295,7 +325,7 @@ class Games(commands.Cog):
         try:
             while not game.game_over and not view.game_over:
                 try:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1)
 
                     # ゲーム終了判定
                     if game.check_game_over():
@@ -323,22 +353,6 @@ class Games(commands.Cog):
                         )
                         await message.channel.send(embed=embed)
                         game.switch_player()
-                        continue
-
-                    # 盤面更新
-                    current_player = game.player1 if game.current_player == OthelloGame.BLACK else game.player2
-                    emoji = "⚫" if game.current_player == OthelloGame.BLACK else "⚪"
-                    black_score, white_score = game.get_score()
-
-                    embed = discord.Embed(
-                        title="⚫⚪ オセロ/リバーシ",
-                        description=f"{game.player1.mention} (⚫黒) vs {game.player2.mention} (⚪白)\n\n{game.get_board_display()}",
-                        color=discord.Color.blue(),
-                        timestamp=discord.utils.utcnow()
-                    )
-                    embed.add_field(name="スコア", value=f"⚫: {black_score} | ⚪: {white_score}", inline=False)
-                    embed.set_footer(text=f"次のターン: {current_player.name} ({emoji})")
-                    await message.edit(embed=embed, view=view)
 
                 except Exception as e:
                     error_message = f"{str(e)}\n\n```\n{traceback.format_exc()}\n```"
@@ -736,39 +750,52 @@ class OthelloGame:
         return display
 
 
-class OthelloView(ui.View):
-    """オセロ用ボタンビュー"""
+class OthelloMoveModal(ui.Modal, title="オセロ - 手を入力"):
+    """オセロの手を入力するモーダル"""
 
-    def __init__(self, game: 'OthelloGame', timeout: int = 300):
-        super().__init__(timeout=timeout)
+    position = ui.TextInput(
+        label="座標を入力 (例: a1, h8)",
+        placeholder="列(a-h)と行(1-8) 例: c4",
+        min_length=2,
+        max_length=2
+    )
+
+    def __init__(self, game: 'OthelloGame', on_move_callback):
+        super().__init__()
         self.game = game
-        self.game_over = False
+        self.on_move_callback = on_move_callback
 
-        # 8x8のボタンを作成
-        for row in range(OthelloGame.ROWS):
-            for col in range(OthelloGame.COLS):
-                button = ui.Button(
-                    label="　",
-                    style=discord.ButtonStyle.gray,
-                    custom_id=f"othello_{row}_{col}"
-                )
-                button.callback = self.make_move_callback(row, col)
-                self.add_item(button)
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            move_input = self.position.value.lower().strip()
 
-    def make_move_callback(self, row: int, col: int):
-        async def callback(interaction: discord.Interaction):
-            current_player_user = self.game.player1 if self.game.current_player == OthelloGame.BLACK else self.game.player2
-
-            if interaction.user.id != current_player_user.id:
+            if len(move_input) != 2:
                 await interaction.response.send_message(
-                    "あなたのターンではありません",
+                    "❌ 形式が正しくありません。例: c4",
                     ephemeral=True
                 )
                 return
 
-            if self.game_over:
+            col_char, row_char = move_input[0], move_input[1]
+
+            # 列を数値に変換 (a=0, b=1, ... h=7)
+            if col_char < 'a' or col_char > 'h':
                 await interaction.response.send_message(
-                    "ゲームは既に終了しています",
+                    "❌ 列は a-h で指定してください",
+                    ephemeral=True
+                )
+                return
+
+            col = ord(col_char) - ord('a')
+
+            # 行を数値に変換 (1=0, 2=1, ... 8=7)
+            try:
+                row = int(row_char) - 1
+                if row < 0 or row > 7:
+                    raise ValueError
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ 行は 1-8 で指定してください",
                     ephemeral=True
                 )
                 return
@@ -776,17 +803,58 @@ class OthelloView(ui.View):
             # 有効な手か確認
             valid_moves = self.game.get_valid_moves()
             if (row, col) not in valid_moves:
+                valid_moves_str = ", ".join([f"{chr(c+ord('a'))}{r+1}" for r, c in valid_moves[:5]])
                 await interaction.response.send_message(
-                    "その位置には置けません",
+                    f"❌ その位置には置けません\n有効な手: {valid_moves_str}...",
                     ephemeral=True
                 )
                 return
 
+            # 手を実行
             self.game.place_piece(row, col)
             self.game.switch_player()
-            await interaction.response.defer()
 
-        return callback
+            await interaction.response.defer()
+            await self.on_move_callback()
+
+        except Exception as e:
+            logger.error(f"Error in othello modal: {str(e)}")
+            await interaction.response.send_message(
+                f"❌ エラーが発生しました: {str(e)}",
+                ephemeral=True
+            )
+
+
+class OthelloView(ui.View):
+    """オセロ用ビュー - 手を入力するボタンのみ"""
+
+    def __init__(self, game: 'OthelloGame', on_move_callback, timeout: int = 300):
+        super().__init__(timeout=timeout)
+        self.game = game
+        self.game_over = False
+        self.on_move_callback = on_move_callback
+
+    @ui.button(label="手を入力", style=discord.ButtonStyle.primary)
+    async def move_button(self, interaction: discord.Interaction, button: ui.Button):
+        current_player_user = self.game.player1 if self.game.current_player == OthelloGame.BLACK else self.game.player2
+
+        if interaction.user.id != current_player_user.id:
+            await interaction.response.send_message(
+                "あなたのターンではありません",
+                ephemeral=True
+            )
+            return
+
+        if self.game_over:
+            await interaction.response.send_message(
+                "ゲームは既に終了しています",
+                ephemeral=True
+            )
+            return
+
+        # モーダルを表示
+        modal = OthelloMoveModal(self.game, self.on_move_callback)
+        await interaction.response.send_modal(modal)
 
     async def on_timeout(self):
         self.game_over = True
