@@ -487,10 +487,7 @@ def run_migration(db: Database, favorites_path: str = 'data/favorites.json',
     migration = DataMigration(db, favorites_path, playlists_path)
     report = migration.run_migration()
 
-    # Print summary to console
-    report.print_summary()
-
-    # Return summary as dictionary
+    # Return summary as dictionary (without printing detailed summary)
     return report.get_summary()
 
 
