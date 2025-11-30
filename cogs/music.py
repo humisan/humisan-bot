@@ -471,7 +471,6 @@ class Music(commands.Cog):
                 # 再生履歴に記録
                 try:
                     self.db.record_music_history(
-                        guild_id=str(interaction.guild_id),
                         user_id=str(interaction.user.id),
                         title=first_song['title'],
                         url=first_song['webpage_url'],
@@ -926,7 +925,6 @@ class Music(commands.Cog):
                         requester = song.get('requester')
                         if requester:
                             self.db.record_music_history(
-                                guild_id=str(guild.id),
                                 user_id=str(requester.id),
                                 title=song['title'],
                                 url=song['webpage_url'],
@@ -1700,7 +1698,6 @@ class SearchView(discord.ui.View):
                         try:
                             logger.info(f"Recording music history")
                             self.music_cog.db.record_music_history(
-                                guild_id=str(interaction.guild_id),
                                 user_id=str(interaction.user.id),
                                 title=song['title'],
                                 url=song['webpage_url'],

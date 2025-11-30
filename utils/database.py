@@ -55,16 +55,13 @@ class Database:
                 )
             ''')
 
-            # Playlists table - Store custom playlists
+            # Playlists table - Store custom playlists (global, not guild-specific)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS playlists (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id TEXT NOT NULL,
-                    name TEXT NOT NULL,
+                    name TEXT NOT NULL UNIQUE,
                     created_by TEXT NOT NULL,
-                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE,
-                    UNIQUE(guild_id, name)
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 
@@ -84,11 +81,10 @@ class Database:
                 )
             ''')
 
-            # User favorites table - Store individual user favorites
+            # User favorites table - Store individual user favorites (global, not guild-specific)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_favorites (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     url TEXT NOT NULL,
@@ -96,8 +92,7 @@ class Database:
                     duration INTEGER,
                     thumbnail TEXT,
                     added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (guild_id) REFERENCES servers(guild_id) ON DELETE CASCADE,
-                    UNIQUE(guild_id, user_id, url)
+                    UNIQUE(user_id, url)
                 )
             ''')
 
@@ -141,7 +136,7 @@ class Database:
 
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_favorites_user
-                ON user_favorites(guild_id, user_id)
+                ON user_favorites(user_id)
             ''')
 
             cursor.execute('''
@@ -154,11 +149,10 @@ class Database:
                 ON bot_stats(guild_id, date)
             ''')
 
-            # Music history table - Track played songs for recommendations
+            # Music history table - Track played songs for recommendations (global, not guild-specific)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS music_history (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
                     title TEXT NOT NULL,
                     url TEXT NOT NULL,
@@ -168,18 +162,16 @@ class Database:
                 )
             ''')
 
-            # User stats table - Track user statistics
+            # User stats table - Track user statistics (global, not guild-specific)
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS user_stats (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    guild_id TEXT NOT NULL,
-                    user_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL UNIQUE,
                     total_plays INTEGER DEFAULT 0,
                     total_playtime INTEGER DEFAULT 0,
                     favorite_genre TEXT,
                     last_played_at DATETIME,
-                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(guild_id, user_id)
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
 
@@ -212,12 +204,12 @@ class Database:
             # Create indexes for new tables
             cursor.execute('''
                 CREATE INDEX IF NOT EXISTS idx_music_history_user
-                ON music_history(guild_id, user_id)
+                ON music_history(user_id)
             ''')
 
             cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_user_stats_guild
-                ON user_stats(guild_id, user_id)
+                CREATE INDEX IF NOT EXISTS idx_user_stats_user
+                ON user_stats(user_id)
             ''')
 
             cursor.execute('''
@@ -359,12 +351,11 @@ class Database:
 
     # ==================== PLAYLIST METHODS ====================
 
-    def create_playlist(self, guild_id: str, name: str, created_by: str) -> Optional[int]:
+    def create_playlist(self, name: str, created_by: str) -> Optional[int]:
         """
-        Create new playlist
+        Create new playlist (global, not guild-specific)
 
         Args:
-            guild_id: Discord guild ID
             name: Playlist name
             created_by: User ID who created the playlist
 
@@ -376,17 +367,17 @@ class Database:
 
         try:
             cursor.execute('''
-                INSERT INTO playlists (guild_id, name, created_by)
-                VALUES (?, ?, ?)
-            ''', (guild_id, name, created_by))
+                INSERT INTO playlists (name, created_by)
+                VALUES (?, ?)
+            ''', (name, created_by))
 
             playlist_id = cursor.lastrowid
             conn.commit()
-            logger.info(f"Playlist '{name}' created in guild {guild_id}")
+            logger.info(f"Playlist '{name}' created")
             return playlist_id
 
         except sqlite3.IntegrityError:
-            logger.warning(f"Playlist '{name}' already exists in guild {guild_id}")
+            logger.warning(f"Playlist '{name}' already exists")
             return None
         except sqlite3.Error as e:
             logger.error(f"Error creating playlist: {e}")
@@ -424,12 +415,11 @@ class Database:
         finally:
             conn.close()
 
-    def get_playlist_by_name(self, guild_id: str, name: str) -> Optional[Dict[str, Any]]:
+    def get_playlist_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
-        Get playlist by name
+        Get playlist by name (global)
 
         Args:
-            guild_id: Discord guild ID
             name: Playlist name
 
         Returns:
@@ -440,8 +430,8 @@ class Database:
 
         try:
             cursor.execute('''
-                SELECT * FROM playlists WHERE guild_id = ? AND name = ?
-            ''', (guild_id, name))
+                SELECT * FROM playlists WHERE name = ?
+            ''', (name,))
 
             row = cursor.fetchone()
             if row:
@@ -449,17 +439,14 @@ class Database:
             return None
 
         except sqlite3.Error as e:
-            logger.error(f"Error getting playlist '{name}' in guild {guild_id}: {e}")
+            logger.error(f"Error getting playlist '{name}': {e}")
             return None
         finally:
             conn.close()
 
-    def get_all_playlists(self, guild_id: str) -> List[Dict[str, Any]]:
+    def get_all_playlists(self) -> List[Dict[str, Any]]:
         """
-        Get all playlists for a guild
-
-        Args:
-            guild_id: Discord guild ID
+        Get all playlists (global)
 
         Returns:
             List of playlist dictionaries
@@ -469,14 +456,14 @@ class Database:
 
         try:
             cursor.execute('''
-                SELECT * FROM playlists WHERE guild_id = ? ORDER BY created_at DESC
-            ''', (guild_id,))
+                SELECT * FROM playlists ORDER BY created_at DESC
+            ''')
 
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
 
         except sqlite3.Error as e:
-            logger.error(f"Error getting playlists for guild {guild_id}: {e}")
+            logger.error(f"Error getting playlists: {e}")
             return []
         finally:
             conn.close()
@@ -609,14 +596,13 @@ class Database:
 
     # ==================== USER FAVORITES METHODS ====================
 
-    def add_favorite(self, guild_id: str, user_id: str, title: str, url: str,
+    def add_favorite(self, user_id: str, title: str, url: str,
                     webpage_url: Optional[str], duration: Optional[int],
                     thumbnail: Optional[str]) -> Optional[int]:
         """
-        Add song to user favorites
+        Add song to user favorites (global, not guild-specific)
 
         Args:
-            guild_id: Discord guild ID
             user_id: User ID
             title: Song title
             url: Direct audio URL
@@ -632,13 +618,13 @@ class Database:
 
         try:
             cursor.execute('''
-                INSERT INTO user_favorites (guild_id, user_id, title, url, webpage_url, duration, thumbnail)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (guild_id, user_id, title, url, webpage_url, duration, thumbnail))
+                INSERT INTO user_favorites (user_id, title, url, webpage_url, duration, thumbnail)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (user_id, title, url, webpage_url, duration, thumbnail))
 
             favorite_id = cursor.lastrowid
             conn.commit()
-            logger.info(f"Favorite '{title}' added for user {user_id} in guild {guild_id}")
+            logger.info(f"Favorite '{title}' added for user {user_id}")
             return favorite_id
 
         except sqlite3.IntegrityError:
@@ -651,12 +637,11 @@ class Database:
         finally:
             conn.close()
 
-    def get_user_favorites(self, guild_id: str, user_id: str) -> List[Dict[str, Any]]:
+    def get_user_favorites(self, user_id: str) -> List[Dict[str, Any]]:
         """
-        Get user's favorite songs
+        Get user's favorite songs (global)
 
         Args:
-            guild_id: Discord guild ID
             user_id: User ID
 
         Returns:
@@ -668,9 +653,9 @@ class Database:
         try:
             cursor.execute('''
                 SELECT * FROM user_favorites
-                WHERE guild_id = ? AND user_id = ?
+                WHERE user_id = ?
                 ORDER BY added_at DESC
-            ''', (guild_id, user_id))
+            ''', (user_id,))
 
             rows = cursor.fetchall()
             return [dict(row) for row in rows]
@@ -710,12 +695,11 @@ class Database:
         finally:
             conn.close()
 
-    def delete_favorite_by_url(self, guild_id: str, user_id: str, url: str) -> bool:
+    def delete_favorite_by_url(self, user_id: str, url: str) -> bool:
         """
         Delete favorite by URL
 
         Args:
-            guild_id: Discord guild ID
             user_id: User ID
             url: Song URL
 
@@ -728,8 +712,8 @@ class Database:
         try:
             cursor.execute('''
                 DELETE FROM user_favorites
-                WHERE guild_id = ? AND user_id = ? AND url = ?
-            ''', (guild_id, user_id, url))
+                WHERE user_id = ? AND url = ?
+            ''', (user_id, url))
 
             conn.commit()
             logger.info(f"Favorite deleted for user {user_id} (URL: {url})")
@@ -1041,7 +1025,6 @@ class Database:
 
     def record_music_history(
         self,
-        guild_id: str,
         user_id: str,
         title: str,
         url: str,
@@ -1049,10 +1032,9 @@ class Database:
         duration: Optional[int] = None,
     ) -> bool:
         """
-        Record a song play in history
+        Record a song play in history (global)
 
         Args:
-            guild_id: Discord guild ID
             user_id: Discord user ID
             title: Song title
             url: Song URL
@@ -1067,23 +1049,23 @@ class Database:
 
         try:
             cursor.execute('''
-                INSERT INTO music_history (guild_id, user_id, title, url, genre, duration)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (guild_id, user_id, title, url, genre, duration))
+                INSERT INTO music_history (user_id, title, url, genre, duration)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, title, url, genre, duration))
 
             # Update user stats
             cursor.execute('''
-                INSERT INTO user_stats (guild_id, user_id, total_plays, total_playtime, favorite_genre, last_played_at, updated_at)
-                VALUES (?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT(guild_id, user_id) DO UPDATE SET
+                INSERT INTO user_stats (user_id, total_plays, total_playtime, favorite_genre, last_played_at, updated_at)
+                VALUES (?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(user_id) DO UPDATE SET
                     total_plays = total_plays + 1,
                     total_playtime = total_playtime + COALESCE(?, 0),
                     last_played_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
-            ''', (guild_id, user_id, duration or 0, genre, duration or 0))
+            ''', (user_id, duration or 0, genre, duration or 0))
 
             conn.commit()
-            logger.info(f"Recorded music history for {user_id} in guild {guild_id}")
+            logger.info(f"Recorded music history for {user_id}")
             return True
 
         except sqlite3.Error as e:
@@ -1093,12 +1075,11 @@ class Database:
         finally:
             conn.close()
 
-    def get_user_stats(self, guild_id: str, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_user_stats(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get user's music statistics
+        Get user's music statistics (global)
 
         Args:
-            guild_id: Discord guild ID
             user_id: Discord user ID
 
         Returns:
@@ -1111,8 +1092,8 @@ class Database:
             cursor.execute('''
                 SELECT total_plays, total_playtime, favorite_genre, last_played_at
                 FROM user_stats
-                WHERE guild_id = ? AND user_id = ?
-            ''', (guild_id, user_id))
+                WHERE user_id = ?
+            ''', (user_id,))
 
             row = cursor.fetchone()
             if row:
@@ -1130,12 +1111,11 @@ class Database:
         finally:
             conn.close()
 
-    def get_top_songs(self, guild_id: str, limit: int = 10, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_top_songs(self, limit: int = 10, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Get top played songs
+        Get top played songs (global)
 
         Args:
-            guild_id: Discord guild ID
             limit: Number of songs to return
             user_id: Optional - get top songs for specific user
 
@@ -1150,20 +1130,19 @@ class Database:
                 cursor.execute('''
                     SELECT title, url, COUNT(*) as play_count, genre
                     FROM music_history
-                    WHERE guild_id = ? AND user_id = ?
+                    WHERE user_id = ?
                     GROUP BY url
                     ORDER BY play_count DESC
                     LIMIT ?
-                ''', (guild_id, user_id, limit))
+                ''', (user_id, limit))
             else:
                 cursor.execute('''
                     SELECT title, url, COUNT(*) as play_count, genre
                     FROM music_history
-                    WHERE guild_id = ?
                     GROUP BY url
                     ORDER BY play_count DESC
                     LIMIT ?
-                ''', (guild_id, limit))
+                ''', (limit,))
 
             rows = cursor.fetchall()
             return [
@@ -1182,12 +1161,11 @@ class Database:
         finally:
             conn.close()
 
-    def get_genre_history(self, guild_id: str, user_id: str, limit: int = 50) -> List[str]:
+    def get_genre_history(self, user_id: str, limit: int = 50) -> List[str]:
         """
-        Get user's song genres from history
+        Get user's song genres from history (global)
 
         Args:
-            guild_id: Discord guild ID
             user_id: Discord user ID
             limit: Number of recent songs to analyze
 
@@ -1201,10 +1179,10 @@ class Database:
             cursor.execute('''
                 SELECT DISTINCT genre
                 FROM music_history
-                WHERE guild_id = ? AND user_id = ? AND genre IS NOT NULL
+                WHERE user_id = ? AND genre IS NOT NULL
                 ORDER BY played_at DESC
                 LIMIT ?
-            ''', (guild_id, user_id, limit))
+            ''', (user_id, limit))
 
             rows = cursor.fetchall()
             return [row[0] for row in rows if row[0]]

@@ -54,7 +54,7 @@ class MusicExtended(commands.Cog):
             guild_id = str(interaction.guild_id)
             user_id = str(interaction.user.id)
 
-            stats = self.db.get_user_stats(guild_id, user_id)
+            stats = self.db.get_user_stats(user_id)
 
             if not stats or stats['total_plays'] == 0:
                 await interaction.response.send_message(
@@ -104,7 +104,7 @@ class MusicExtended(commands.Cog):
                     pass
 
             # トップ曲を取得
-            top_songs = self.db.get_top_songs(guild_id, limit=5, user_id=user_id)
+            top_songs = self.db.get_top_songs(limit=5, user_id=user_id)
             if top_songs:
                 top_list = "\n".join(
                     [f"{i+1}. **{song['title']}** ({song['play_count']}回)" for i, song in enumerate(top_songs)]
@@ -220,7 +220,7 @@ class MusicExtended(commands.Cog):
             user_id = str(interaction.user.id)
 
             # ユーザーの再生履歴をチェック
-            user_stats = self.db.get_user_stats(guild_id, user_id)
+            user_stats = self.db.get_user_stats(user_id)
 
             if not user_stats or user_stats['total_plays'] == 0:
                 await interaction.followup.send(
@@ -234,7 +234,7 @@ class MusicExtended(commands.Cog):
                 return
 
             # ユーザーのトップ曲を取得
-            top_songs = self.db.get_top_songs(guild_id, limit=3, user_id=user_id)
+            top_songs = self.db.get_top_songs(limit=3, user_id=user_id)
 
             if not top_songs:
                 await interaction.followup.send(
@@ -511,9 +511,8 @@ class MusicExtended(commands.Cog):
                     if queue.is_empty() and not voice_client.is_playing():
                         logger.info(f"Autoplay: Queue is empty in guild {guild_id}, searching for similar songs...")
 
-                        # ギルドの再生統計から人気の曲を取得
-                        guild_str = str(guild_id)
-                        top_songs = self.db.get_top_songs(guild_str, limit=5)
+                        # 再生統計から人気の曲を取得
+                        top_songs = self.db.get_top_songs(limit=5)
 
                         if top_songs:
                             # 各人気曲から類似曲を検索

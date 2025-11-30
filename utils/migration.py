@@ -198,19 +198,18 @@ class DataMigration:
 
         return success
 
-    def _check_favorite_exists(self, guild_id: str, user_id: str, url: str) -> bool:
+    def _check_favorite_exists(self, user_id: str, url: str) -> bool:
         """
         Check if favorite already exists in database
 
         Args:
-            guild_id: Discord guild ID
             user_id: User ID
             url: Song URL
 
         Returns:
             True if favorite exists, False otherwise
         """
-        favorites = self.db.get_user_favorites(guild_id, user_id)
+        favorites = self.db.get_user_favorites(user_id)
         return any(fav['url'] == url for fav in favorites)
 
     def migrate_favorites(self) -> Tuple[int, int, int]:
@@ -253,14 +252,13 @@ class DataMigration:
                             continue
 
                         # Check if already exists
-                        if self._check_favorite_exists(guild_id, user_id, song['url']):
+                        if self._check_favorite_exists(user_id, song['url']):
                             logger.debug(f"    Skipping duplicate: {song['title']}")
                             self.report.favorites_skipped += 1
                             continue
 
                         # Add to database
                         result = self.db.add_favorite(
-                            guild_id=guild_id,
                             user_id=user_id,
                             title=song.get('title'),
                             url=song.get('url'),
@@ -288,18 +286,17 @@ class DataMigration:
         return (self.report.favorites_migrated, self.report.favorites_skipped,
                 self.report.favorites_errors)
 
-    def _check_playlist_exists(self, guild_id: str, playlist_name: str) -> bool:
+    def _check_playlist_exists(self, playlist_name: str) -> bool:
         """
         Check if playlist already exists in database
 
         Args:
-            guild_id: Discord guild ID
             playlist_name: Playlist name
 
         Returns:
             True if playlist exists, False otherwise
         """
-        playlist = self.db.get_playlist_by_name(guild_id, playlist_name)
+        playlist = self.db.get_playlist_by_name(playlist_name)
         return playlist is not None
 
     def _get_playlist_songs(self, playlist_id: int) -> List[str]:
@@ -347,7 +344,7 @@ class DataMigration:
 
                 try:
                     # Check if playlist already exists
-                    playlist = self.db.get_playlist_by_name(guild_id, playlist_name)
+                    playlist = self.db.get_playlist_by_name(playlist_name)
 
                     if playlist:
                         logger.info(f"    Playlist '{playlist_name}' already exists")
@@ -359,7 +356,6 @@ class DataMigration:
                     else:
                         # Create new playlist (use system user ID for migration)
                         playlist_id = self.db.create_playlist(
-                            guild_id=guild_id,
                             name=playlist_name,
                             created_by='0'  # System user for migration
                         )
