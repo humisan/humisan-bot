@@ -42,6 +42,8 @@
 - メッセージ送信でXP獲得、レベルアップ通知
 
 ### 音楽再生機能
+
+#### スラッシュコマンド
 - `/play` - YouTube URLまたは検索で音楽を再生
 - `/search` - YouTube から曲を検索して候補から選択
 - `/pause` / `/resume` - 一時停止 / 再開
@@ -55,6 +57,20 @@
 - `/favorites` - お気に入りリストを表示
 - `/volume` - 音量調整（0-100%）
 - `/leave` - ボイスチャネルから退出
+- `/lyrics` - 再生中の曲の歌詞を表示（Genius + uta-net 対応）
+- `/stats` - あなたの再生統計を表示
+- `/recommend` - 再生履歴から曲をおすすめ
+
+#### プレフィックスコマンド (h!)
+快速操作用のプレフィックスコマンド：
+- `h!p [URL or キーワード]` - 曲を再生（URL で直接再生または検索キーワード）
+- `h!search [キーワード]` - 曲を検索して結果から選択
+- `h!np` - 現在再生中の曲を表示
+- `h!pause` - 一時停止 / 再開（トグル）
+- `h!skip [count]` - スキップ（デフォルト 1 曲、`h!skip 3` で 3 曲スキップ）
+- `h!vol [+/-num]` - 音量調整（例：`h!vol +10`、`h!vol -5`）
+
+> **注意**: プレフィックスコマンドを使用するには、`.env` ファイルで `COMMAND_PREFIX=h` に設定してください。
 
 ### ウェルカムシステム
 - `/welcome-setup` - ウェルカムメッセージを設定
@@ -117,10 +133,17 @@ cp .env.example .env
 
 ```
 DISCORD_TOKEN=your_discord_bot_token_here
-COMMAND_PREFIX=!
+COMMAND_PREFIX=h
 BOT_OWNER_ID=your_user_id
 LOG_LEVEL=INFO
+GENIUS_API_TOKEN=your_genius_token_here
 ```
+
+**COMMAND_PREFIX について:**
+- このボットはプレフィックスコマンド（例：`h!p`, `h!skip` など）で快速操作ができます
+- `COMMAND_PREFIX=h` で `h!` がプレフィックスになります
+- `COMMAND_PREFIX=!` に設定すると `!p`, `!skip` などになります
+- スラッシュコマンド（`/play` など）はプレフィックス設定の影響を受けません
 
 ### 4. Discord Bot の登録
 
