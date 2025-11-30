@@ -1046,13 +1046,14 @@ class Music(commands.Cog):
             embed=create_success_embed("プレイリスト作成", f"「{name}」を作成しました")
         )
 
-    @playlist_group.command(name='add', description='プレイリストに曲を追加')
+    @playlist_group.command(name='add', description='プレイリストに曲または YouTube プレイリストを追加')
     @app_commands.describe(
         name='プレイリスト名',
-        url='YouTube URL'
+        url='YouTube URL（動画またはプレイリスト）',
+        is_playlist='URL がYouTubeプレイリストの場合は True'
     )
-    async def playlist_add(self, interaction: discord.Interaction, name: str, url: str):
-        """プレイリストに曲を追加"""
+    async def playlist_add(self, interaction: discord.Interaction, name: str, url: str, is_playlist: bool = False):
+        """プレイリストに曲を追加（または YouTube プレイリストをインポート）"""
         # URL バリデーション
         if not ('youtube.com' in url or 'youtu.be' in url):
             await interaction.response.send_message(
@@ -1073,36 +1074,92 @@ class Music(commands.Cog):
         await interaction.response.defer()
 
         try:
-            # 曲情報を取得
             loop = asyncio.get_event_loop()
-            data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
 
-            if 'entries' in data:
-                data = data['entries'][0]
+            if is_playlist:
+                # YouTube プレイリスト全体を取得
+                ydl_opts = {
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': 'in_playlist',
+                    'playlistend': 100,  # 最大100曲まで取得
+                }
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
 
-            song = {
-                'title': data.get('title', 'Unknown'),
-                'url': data.get('url'),
-                'webpage_url': data.get('webpage_url'),
-                'duration': data.get('duration', 0)
-            }
+                if 'entries' not in data or not data['entries']:
+                    await interaction.followup.send(
+                        embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
+                    )
+                    return
 
-            self.playlists[user_id][name].append(song)
-            self.save_playlists()
+                added_count = 0
+                failed_count = 0
 
-            await interaction.followup.send(
-                embed=create_success_embed("曲を追加", f"「{song['title']}」をプレイリスト「{name}」に追加しました")
-            )
+                for entry in data['entries']:
+                    try:
+                        if entry is None:
+                            continue
+
+                        video_url = f"https://www.youtube.com/watch?v={entry['id']}"
+                        video_data = await loop.run_in_executor(None, lambda: ytdl.extract_info(video_url, download=False))
+
+                        song = {
+                            'title': video_data.get('title', 'Unknown'),
+                            'url': video_data.get('url'),
+                            'webpage_url': video_data.get('webpage_url'),
+                            'duration': video_data.get('duration', 0)
+                        }
+
+                        self.playlists[user_id][name].append(song)
+                        added_count += 1
+                    except Exception as e:
+                        logger.warning(f"Failed to add video to playlist: {str(e)}")
+                        failed_count += 1
+                        continue
+
+                self.save_playlists()
+
+                status = f"{added_count} 曲追加"
+                if failed_count > 0:
+                    status += f"（{failed_count} 曲失敗）"
+
+                await interaction.followup.send(
+                    embed=create_success_embed(
+                        "プレイリストインポート",
+                        f"YouTube プレイリストから {status} しました"
+                    )
+                )
+            else:
+                # 単一の動画を追加
+                data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
+
+                if 'entries' in data:
+                    data = data['entries'][0]
+
+                song = {
+                    'title': data.get('title', 'Unknown'),
+                    'url': data.get('url'),
+                    'webpage_url': data.get('webpage_url'),
+                    'duration': data.get('duration', 0)
+                }
+
+                self.playlists[user_id][name].append(song)
+                self.save_playlists()
+
+                await interaction.followup.send(
+                    embed=create_success_embed("曲を追加", f"「{song['title']}」をプレイリスト「{name}」に追加しました")
+                )
         except Exception as e:
             logger.error(f"Error adding song to playlist: {str(e)}")
             await interaction.followup.send(
                 embed=create_error_embed("曲の追加に失敗しました", str(e))
             )
 
-    @playlist_group.command(name='load', description='プレイリストをキューに追加')
+    @playlist_group.command(name='play', description='プレイリストを再生（キューに追加）')
     @app_commands.describe(name='プレイリスト名')
-    async def playlist_load(self, interaction: discord.Interaction, name: str):
-        """プレイリストの曲をキューに追加"""
+    async def playlist_play(self, interaction: discord.Interaction, name: str):
+        """プレイリストの曲をキューに追加して再生"""
         user_id = str(interaction.user.id)
 
         if user_id not in self.playlists or name not in self.playlists[user_id]:
@@ -1135,10 +1192,138 @@ class Music(commands.Cog):
 
         await interaction.response.send_message(
             embed=create_success_embed(
-                "プレイリスト追加",
+                "🎵 プレイリスト再生",
                 f"「{name}」の {len(playlist)} 曲をキューに追加しました"
             )
         )
+
+    @playlist_group.command(name='delete', description='プレイリストを削除')
+    @app_commands.describe(name='プレイリスト名')
+    async def playlist_delete(self, interaction: discord.Interaction, name: str):
+        """プレイリストを削除"""
+        user_id = str(interaction.user.id)
+
+        if user_id not in self.playlists or name not in self.playlists[user_id]:
+            await interaction.response.send_message(
+                embed=create_error_embed(f"「{name}」というプレイリストが見つかりません"),
+                ephemeral=True
+            )
+            return
+
+        del self.playlists[user_id][name]
+        self.save_playlists()
+
+        await interaction.response.send_message(
+            embed=create_success_embed("プレイリスト削除", f"「{name}」を削除しました")
+        )
+
+    @playlist_group.command(name='remove', description='プレイリストから曲を削除')
+    @app_commands.describe(
+        name='プレイリスト名',
+        index='削除する曲のインデックス（1から始まる）'
+    )
+    async def playlist_remove(self, interaction: discord.Interaction, name: str, index: int):
+        """プレイリストから指定した曲を削除"""
+        user_id = str(interaction.user.id)
+
+        if user_id not in self.playlists or name not in self.playlists[user_id]:
+            await interaction.response.send_message(
+                embed=create_error_embed(f"「{name}」というプレイリストが見つかりません"),
+                ephemeral=True
+            )
+            return
+
+        playlist = self.playlists[user_id][name]
+
+        if index < 1 or index > len(playlist):
+            await interaction.response.send_message(
+                embed=create_error_embed(
+                    "無効なインデックス",
+                    f"プレイリストには {len(playlist)} 曲あります"
+                ),
+                ephemeral=True
+            )
+            return
+
+        removed_song = playlist.pop(index - 1)
+        self.save_playlists()
+
+        await interaction.response.send_message(
+            embed=create_success_embed(
+                "曲を削除",
+                f"「{removed_song['title']}」をプレイリスト「{name}」から削除しました"
+            )
+        )
+
+    @playlist_group.command(name='share', description='プレイリストをコード化して共有')
+    @app_commands.describe(name='プレイリスト名')
+    async def playlist_share(self, interaction: discord.Interaction, name: str):
+        """プレイリストを共有可能なコード化形式で出力"""
+        user_id = str(interaction.user.id)
+
+        if user_id not in self.playlists or name not in self.playlists[user_id]:
+            await interaction.response.send_message(
+                embed=create_error_embed(f"「{name}」というプレイリストが見つかりません"),
+                ephemeral=True
+            )
+            return
+
+        playlist = self.playlists[user_id][name]
+
+        if not playlist:
+            await interaction.response.send_message(
+                embed=create_error_embed(f"「{name}」は空のプレイリストです"),
+                ephemeral=True
+            )
+            return
+
+        # プレイリストデータをシリアライズ
+        playlist_data = {
+            'name': name,
+            'created_by': str(interaction.user),
+            'songs': playlist
+        }
+
+        try:
+            # JSON エンコード
+            json_str = json.dumps(playlist_data, ensure_ascii=False)
+            # Base64 エンコード
+            encoded = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+
+            # コードを分割（Discord メッセージ上限対応）
+            code_chunks = [encoded[i:i+1900] for i in range(0, len(encoded), 1900)]
+
+            embed = discord.Embed(
+                title="📤 プレイリスト共有",
+                color=discord.Color.green(),
+                description=f"プレイリスト「{name}」を共有できます"
+            )
+            embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=True)
+            embed.add_field(name="作成者", value=str(interaction.user), inline=True)
+            embed.add_field(
+                name="使用方法",
+                value="/playlist import <コード> でインポートできます",
+                inline=False
+            )
+
+            await interaction.response.send_message(embed=embed)
+
+            # コードを送信
+            for i, chunk in enumerate(code_chunks):
+                chunk_embed = discord.Embed(
+                    title=f"共有コード ({i+1}/{len(code_chunks)})",
+                    color=discord.Color.blue(),
+                    description=f"```\n{chunk}\n```"
+                )
+                await interaction.followup.send(embed=chunk_embed)
+
+            logger.info(f"User {interaction.user.name} shared playlist: {name}")
+
+        except Exception as e:
+            logger.error(f"Error sharing playlist: {str(e)}")
+            await interaction.followup.send(
+                embed=create_error_embed("共有失敗", str(e))
+            )
 
     @playlist_group.command(name='import', description='共有されたプレイリストをインポート')
     @app_commands.describe(code='共有コード')
@@ -1233,8 +1418,9 @@ class Music(commands.Cog):
             )
 
     @playlist_group.command(name='list', description='プレイリスト一覧を表示')
-    async def playlist_list(self, interaction: discord.Interaction):
-        """プレイリスト一覧を表示"""
+    @app_commands.describe(name='プレイリスト名（指定時は詳細表示）')
+    async def playlist_list(self, interaction: discord.Interaction, name: str = None):
+        """プレイリスト一覧を表示（詳細表示も可能）"""
         user_id = str(interaction.user.id)
 
         if user_id not in self.playlists or not self.playlists[user_id]:
@@ -1246,20 +1432,58 @@ class Music(commands.Cog):
 
         playlists = self.playlists[user_id]
 
-        embed = discord.Embed(
-            title="📋 プレイリスト一覧",
-            color=discord.Color.blue(),
-            timestamp=discord.utils.utcnow()
-        )
+        if name:
+            # 詳細表示
+            if name not in playlists:
+                await interaction.response.send_message(
+                    embed=create_error_embed(f"「{name}」というプレイリストが見つかりません"),
+                    ephemeral=True
+                )
+                return
 
-        for plist_name, songs in playlists.items():
-            embed.add_field(
-                name=plist_name,
-                value=f"{len(songs)} 曲",
-                inline=False
+            songs = playlists[name]
+            embed = discord.Embed(
+                title=f"📋 プレイリスト「{name}」",
+                color=discord.Color.blue(),
+                timestamp=discord.utils.utcnow()
+            )
+            embed.add_field(name="曲数", value=f"{len(songs)} 曲", inline=True)
+
+            if songs:
+                songs_list = "\n".join(
+                    [f"{i+1}. {song['title'][:50]}" for i, song in enumerate(songs[:20])]
+                )
+                if len(songs) > 20:
+                    songs_list += f"\n... ほか {len(songs) - 20} 曲"
+
+                embed.add_field(
+                    name="曲一覧",
+                    value=songs_list,
+                    inline=False
+                )
+
+            embed.set_footer(text="/playlist remove で曲を削除できます")
+            await interaction.response.send_message(embed=embed)
+        else:
+            # 一覧表示
+            embed = discord.Embed(
+                title="📋 プレイリスト一覧",
+                color=discord.Color.blue(),
+                timestamp=discord.utils.utcnow()
             )
 
-        await interaction.response.send_message(embed=embed)
+            total_songs = 0
+            for plist_name, songs in playlists.items():
+                embed.add_field(
+                    name=plist_name,
+                    value=f"{len(songs)} 曲",
+                    inline=False
+                )
+                total_songs += len(songs)
+
+            embed.set_footer(text=f"全{len(playlists)}個のプレイリスト、全{total_songs}曲 | /playlist list <プレイリスト名> で詳細表示")
+
+            await interaction.response.send_message(embed=embed)
 
 
 class MusicControlView(discord.ui.View):
