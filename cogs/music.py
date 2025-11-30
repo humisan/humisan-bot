@@ -1288,7 +1288,7 @@ class Music(commands.Cog):
 
                     # 並列処理用関数
                     async def process_video(entry, idx):
-                        nonlocal added_count, unavailable_count, failed_count, last_update_time
+                        nonlocal added_count, unavailable_count, failed_count
 
                         try:
                             if entry is None:
@@ -1338,26 +1338,6 @@ class Music(commands.Cog):
 
                                 self.playlists[user_id][name].append(song)
                                 added_count += 1
-
-                                # 30秒ごとに進捗を更新
-                                current_time = asyncio.get_event_loop().time()
-                                if current_time - last_update_time >= 30:
-                                    last_update_time = current_time
-                                    self.save_playlists()
-                                    progress_msg = f"追加中... {added_count} / {total_entries} 処理済\n利用不可: {unavailable_count} 曲"
-                                    logger.info(f"Progress: {added_count}/{total_entries} songs processed")
-
-                                    try:
-                                        await initial_msg.edit(
-                                            embed=discord.Embed(
-                                                title="📥 プレイリスト追加中",
-                                                description=progress_msg,
-                                                color=discord.Color.blue()
-                                            )
-                                        )
-                                    except Exception as notify_err:
-                                        logger.error(f"Failed to edit progress message: {str(notify_err)}")
-
                                 return True
 
                             except Exception as e:
@@ -1379,6 +1359,25 @@ class Music(commands.Cog):
                         # 並列処理
                         tasks = [process_video(entry, idx) for idx, entry in enumerate(batch, batch_start + 1)]
                         await asyncio.gather(*tasks)
+
+                        # バッチ終了後に進捗を更新
+                        current_time = asyncio.get_event_loop().time()
+                        if current_time - last_update_time >= 30:
+                            last_update_time = current_time
+                            self.save_playlists()
+                            progress_msg = f"追加中... {added_count} / {total_entries} 処理済\n利用不可: {unavailable_count} 曲"
+                            logger.info(f"Progress: {added_count}/{total_entries} songs processed")
+
+                            try:
+                                await initial_msg.edit(
+                                    embed=discord.Embed(
+                                        title="📥 プレイリスト追加中",
+                                        description=progress_msg,
+                                        color=discord.Color.blue()
+                                    )
+                                )
+                            except Exception as notify_err:
+                                logger.error(f"Failed to edit progress message: {str(notify_err)}")
 
                         logger.info(f"Batch processed: {batch_end}/{total_entries}")
 
