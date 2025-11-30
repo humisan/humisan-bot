@@ -60,38 +60,24 @@ class MusicPrefix(commands.Cog):
             await ctx.defer()
             await music_cog._perform_play(ctx, query)
         else:
-            # キーワードの場合は検索結果を表示
+            # キーワードの場合は一番上の結果を自動的に再生
             await ctx.defer()
             try:
-                songs = await music_cog.search_songs(query, limit=20)
+                songs = await music_cog.search_songs(query, limit=1)
 
                 if not songs:
                     await ctx.send(embed=create_error_embed("曲が見つかりません"))
                     return
 
-                embed = discord.Embed(
-                    title="🔍 検索結果",
-                    description=f"「{query}」の検索結果（全 {len(songs)} 件）",
-                    color=discord.Color.blue()
-                )
+                # 一番上の曲を自動再生
+                top_song = songs[0]
+                song_url = top_song.get('url')
 
-                # 最初のページの5曲を表示
-                description = ""
-                for i, song in enumerate(songs[:5], 1):
-                    title = song.get('title', 'Unknown')
-                    duration = music_cog.format_duration(song.get('duration', 0))
-                    description += f"{i}. {title} ({duration})\n"
-
-                embed.description += "\n" + description
-                if len(songs) > 5:
-                    embed.set_footer(text="リアクションで曲を選択してください（1-5 の数字）")
+                if song_url:
+                    # URL を使って再生
+                    await music_cog._perform_play(ctx, song_url)
                 else:
-                    embed.set_footer(text="リアクションで曲を選択してください（1-5 の数字）")
-
-                # SearchView を使用（slash command と同じ処理）
-                from cogs.music import SearchView
-                view = SearchView(music_cog, songs, ctx.author, query)
-                await ctx.send(embed=view.get_embed(), view=view)
+                    await ctx.send(embed=create_error_embed("曲の再生に失敗しました", "URL が取得できません"))
 
             except Exception as e:
                 logger.error(f"Search error: {str(e)}")
