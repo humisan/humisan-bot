@@ -1274,8 +1274,10 @@ class Music(commands.Cog):
                     added_count = 0
                     failed_count = 0
                     unavailable_count = 0
+                    batch_count = 0
+                    total_entries = len(data['entries'])
 
-                    logger.info(f"Playlist extraction started with {len(data['entries'])} entries")
+                    logger.info(f"Playlist extraction started with {total_entries} entries")
 
                     for idx, entry in enumerate(data['entries'], 1):
                         try:
@@ -1326,9 +1328,23 @@ class Music(commands.Cog):
 
                                 self.playlists[user_id][name].append(song)
                                 added_count += 1
+                                batch_count += 1
 
-                                if idx % 50 == 0:
-                                    logger.info(f"Progress: {idx}/{len(data['entries'])} songs processed")
+                                # 25曲ごとに進捗を通知してセーブ
+                                if batch_count >= 25:
+                                    self.save_playlists()
+                                    progress_msg = f"進捗: {added_count} 曲追加しました（{idx}/{total_entries} 処理中）"
+                                    if unavailable_count > 0:
+                                        progress_msg += f"\n利用不可: {unavailable_count} 曲"
+                                    await interaction.followup.send(
+                                        embed=discord.Embed(
+                                            title="📥 プレイリスト追加中...",
+                                            description=progress_msg,
+                                            color=discord.Color.blue()
+                                        )
+                                    )
+                                    batch_count = 0
+
                             except Exception as e:
                                 logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
                                 unavailable_count += 1
@@ -1367,7 +1383,7 @@ class Music(commands.Cog):
                 else:
                     await interaction.followup.send(
                         embed=create_success_embed(
-                            "プレイリストインポート",
+                            "✅ プレイリストインポート完了",
                             f"YouTube プレイリストから {status} しました"
                         )
                     )
