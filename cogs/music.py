@@ -1111,6 +1111,8 @@ class Music(commands.Cog):
                     'no_warnings': True,
                     'extract_flat': 'in_playlist',
                     'playlistend': 100,  # 最大100曲まで取得
+                    'ignoreerrors': True,  # 利用できない動画をスキップ
+                    'skip_unavailable_fragments': True,
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
@@ -1123,41 +1125,76 @@ class Music(commands.Cog):
 
                 added_count = 0
                 failed_count = 0
+                unavailable_count = 0
 
                 for entry in data['entries']:
                     try:
                         if entry is None:
+                            unavailable_count += 1
                             continue
 
-                        video_url = f"https://www.youtube.com/watch?v={entry['id']}"
-                        video_data = await loop.run_in_executor(None, lambda: ytdl.extract_info(video_url, download=False))
+                        video_id = entry.get('id')
+                        if not video_id:
+                            unavailable_count += 1
+                            continue
 
-                        song = {
-                            'title': video_data.get('title', 'Unknown'),
-                            'url': video_data.get('url'),
-                            'webpage_url': video_data.get('webpage_url'),
-                            'duration': video_data.get('duration', 0)
-                        }
+                        video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-                        self.playlists[user_id][name].append(song)
-                        added_count += 1
+                        try:
+                            # 動画情報を取得
+                            ydl_single = yt_dlp.YoutubeDL({
+                                'quiet': True,
+                                'no_warnings': True,
+                                'ignoreerrors': True,
+                            })
+                            video_data = await loop.run_in_executor(None, lambda: ydl_single.extract_info(video_url, download=False))
+
+                            if video_data is None:
+                                logger.debug(f"Video unavailable: {video_id}")
+                                unavailable_count += 1
+                                continue
+
+                            song = {
+                                'title': video_data.get('title', 'Unknown'),
+                                'url': video_data.get('url'),
+                                'webpage_url': video_data.get('webpage_url'),
+                                'duration': video_data.get('duration', 0)
+                            }
+
+                            self.playlists[user_id][name].append(song)
+                            added_count += 1
+                        except Exception as e:
+                            logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
+                            unavailable_count += 1
+                            continue
+
                     except Exception as e:
-                        logger.warning(f"Failed to add video to playlist: {str(e)}")
+                        logger.warning(f"Error processing entry: {str(e)}")
                         failed_count += 1
                         continue
 
                 self.save_playlists()
 
                 status = f"{added_count} 曲追加"
+                if unavailable_count > 0:
+                    status += f"（{unavailable_count} 曲利用不可）"
                 if failed_count > 0:
-                    status += f"（{failed_count} 曲失敗）"
+                    status += f"（{failed_count} 曲エラー）"
 
-                await interaction.followup.send(
-                    embed=create_success_embed(
-                        "プレイリストインポート",
-                        f"YouTube プレイリストから {status} しました"
+                if added_count == 0:
+                    await interaction.followup.send(
+                        embed=create_error_embed(
+                            "プレイリストインポート失敗",
+                            f"追加できた曲がありません。利用不可: {unavailable_count}, エラー: {failed_count}"
+                        )
                     )
-                )
+                else:
+                    await interaction.followup.send(
+                        embed=create_success_embed(
+                            "プレイリストインポート",
+                            f"YouTube プレイリストから {status} しました"
+                        )
+                    )
             else:
                 # 単一の動画を追加
                 data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False))
