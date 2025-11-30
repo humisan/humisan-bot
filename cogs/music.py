@@ -1281,21 +1281,24 @@ class Music(commands.Cog):
                     added_count = 0
                     failed_count = 0
                     unavailable_count = 0
-                    batch_count = 0
                     total_entries = len(data['entries'])
+                    last_notification = 0
 
                     logger.info(f"Playlist extraction started with {total_entries} entries")
 
-                    for idx, entry in enumerate(data['entries'], 1):
+                    # 並列処理用関数
+                    async def process_video(entry, idx):
+                        nonlocal added_count, unavailable_count, failed_count, last_notification
+
                         try:
                             if entry is None:
                                 unavailable_count += 1
-                                continue
+                                return False
 
                             video_id = entry.get('id')
                             if not video_id:
                                 unavailable_count += 1
-                                continue
+                                return False
 
                             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
@@ -1305,10 +1308,10 @@ class Music(commands.Cog):
                                     'quiet': True,
                                     'no_warnings': True,
                                     'ignoreerrors': True,
-                                    'skip_unavailable': True,  # 利用不可な動画をスキップ
+                                    'skip_unavailable': True,
                                     'socket_timeout': 30,
-                                    'no_color': True,  # カラー出力を無効化
-                                    'logger': logger,  # 標準エラーをログに出力
+                                    'no_color': True,
+                                    'logger': logger,
                                     'http_headers': {
                                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                                     },
@@ -1318,13 +1321,13 @@ class Music(commands.Cog):
                                 if video_data is None:
                                     logger.debug(f"Video unavailable: {video_id}")
                                     unavailable_count += 1
-                                    continue
+                                    return False
 
                                 # 必要なフィールドをチェック
                                 if not video_data.get('url') or not video_data.get('webpage_url'):
                                     logger.debug(f"Video missing required fields: {video_id}")
                                     unavailable_count += 1
-                                    continue
+                                    return False
 
                                 song = {
                                     'title': video_data.get('title', 'Unknown'),
@@ -1335,32 +1338,48 @@ class Music(commands.Cog):
 
                                 self.playlists[user_id][name].append(song)
                                 added_count += 1
-                                batch_count += 1
 
-                                # 25曲ごとに進捗を通知してセーブ
-                                if batch_count >= 25:
+                                # 10曲ごとに進捗通知＆セーブ
+                                if added_count - last_notification >= 10:
+                                    last_notification = added_count
                                     self.save_playlists()
-                                    progress_msg = f"進捗: {added_count} 曲追加しました（{idx}/{total_entries} 処理中）"
-                                    if unavailable_count > 0:
-                                        progress_msg += f"\n利用不可: {unavailable_count} 曲"
-                                    await interaction.followup.send(
-                                        embed=discord.Embed(
-                                            title="📥 プレイリスト追加中...",
-                                            description=progress_msg,
-                                            color=discord.Color.blue()
+                                    progress_msg = f"追加中... {added_count} / {total_entries} 処理済\n利用不可: {unavailable_count} 曲"
+                                    logger.info(f"Progress: {added_count}/{total_entries} songs processed")
+
+                                    try:
+                                        await interaction.followup.send(
+                                            embed=discord.Embed(
+                                                title="📥 プレイリスト追加中",
+                                                description=progress_msg,
+                                                color=discord.Color.blue()
+                                            )
                                         )
-                                    )
-                                    batch_count = 0
+                                    except Exception as notify_err:
+                                        logger.error(f"Failed to send progress notification: {str(notify_err)}")
+
+                                return True
 
                             except Exception as e:
                                 logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
                                 unavailable_count += 1
-                                continue
+                                return False
 
                         except Exception as e:
                             logger.warning(f"Error processing entry: {str(e)}")
                             failed_count += 1
-                            continue
+                            return False
+
+                    # バッチ処理（5個ずつ並列実行）
+                    batch_size = 5
+                    for batch_start in range(0, total_entries, batch_size):
+                        batch_end = min(batch_start + batch_size, total_entries)
+                        batch = data['entries'][batch_start:batch_end]
+
+                        # 並列処理
+                        tasks = [process_video(entry, idx) for idx, entry in enumerate(batch, batch_start + 1)]
+                        await asyncio.gather(*tasks)
+
+                        logger.info(f"Batch processed: {batch_end}/{total_entries}")
 
                 except Exception as e:
                     logger.error(f"Error extracting playlist info: {str(e)}")
