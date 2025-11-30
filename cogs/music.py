@@ -1601,7 +1601,7 @@ class PlaylistShuffleView(discord.ui.View):
     """プレイリスト再生時のシャッフル選択ビュー"""
 
     def __init__(self, music_cog, interaction, playlist, playlist_name, first_song, voice_client):
-        super().__init__(timeout=60)
+        super().__init__(timeout=None)  # タイムアウトなし
         self.music_cog = music_cog
         self.interaction = interaction
         self.playlist = playlist
@@ -1704,12 +1704,6 @@ class PlaylistShuffleView(discord.ui.View):
                     f"プレイリストの再生に失敗しました: {str(e)}"
                 )
             )
-
-    async def on_timeout(self):
-        """タイムアウト時の処理"""
-        # タイムアウト時は通常再生
-        self.shuffle = False
-        await self._play_playlist()
 
 
 class MusicControlView(discord.ui.View):
