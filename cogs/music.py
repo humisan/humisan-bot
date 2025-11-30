@@ -1241,7 +1241,7 @@ class Music(commands.Cog):
             return
 
         # 初回応答を送信（プレイリスト取得開始）
-        await interaction.response.send_message(
+        initial_msg = await interaction.response.send_message(
             embed=discord.Embed(
                 title="✅ プレイリスト取得中...",
                 description="YouTube プレイリスト情報を取得しています",
@@ -1282,13 +1282,13 @@ class Music(commands.Cog):
                     failed_count = 0
                     unavailable_count = 0
                     total_entries = len(data['entries'])
-                    last_notification = 0
+                    last_update_time = asyncio.get_event_loop().time()
 
                     logger.info(f"Playlist extraction started with {total_entries} entries")
 
                     # 並列処理用関数
                     async def process_video(entry, idx):
-                        nonlocal added_count, unavailable_count, failed_count, last_notification
+                        nonlocal added_count, unavailable_count, failed_count, last_update_time
 
                         try:
                             if entry is None:
@@ -1339,15 +1339,16 @@ class Music(commands.Cog):
                                 self.playlists[user_id][name].append(song)
                                 added_count += 1
 
-                                # 10曲ごとに進捗通知＆セーブ
-                                if added_count - last_notification >= 10:
-                                    last_notification = added_count
+                                # 30秒ごとに進捗を更新
+                                current_time = asyncio.get_event_loop().time()
+                                if current_time - last_update_time >= 30:
+                                    last_update_time = current_time
                                     self.save_playlists()
                                     progress_msg = f"追加中... {added_count} / {total_entries} 処理済\n利用不可: {unavailable_count} 曲"
                                     logger.info(f"Progress: {added_count}/{total_entries} songs processed")
 
                                     try:
-                                        await interaction.followup.send(
+                                        await initial_msg.edit(
                                             embed=discord.Embed(
                                                 title="📥 プレイリスト追加中",
                                                 description=progress_msg,
@@ -1355,7 +1356,7 @@ class Music(commands.Cog):
                                             )
                                         )
                                     except Exception as notify_err:
-                                        logger.error(f"Failed to send progress notification: {str(notify_err)}")
+                                        logger.error(f"Failed to edit progress message: {str(notify_err)}")
 
                                 return True
 
