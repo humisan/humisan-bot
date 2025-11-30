@@ -1020,6 +1020,33 @@ class Music(commands.Cog):
         await self.bot.wait_until_ready()
         logger.info("Auto-disconnect task started")
 
+    # ==================== オートコンプリート関数 ====================
+
+    async def playlist_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ) -> List[app_commands.Choice[str]]:
+        """プレイリスト名のオートコンプリート"""
+        user_id = str(interaction.user.id)
+
+        if user_id not in self.playlists:
+            return []
+
+        playlist_names = list(self.playlists[user_id].keys())
+
+        # 現在の入力に基づいてフィルタリング
+        matches = [
+            name for name in playlist_names
+            if name.lower().startswith(current.lower())
+        ]
+
+        # 最大25個まで返す（Discord の制限）
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name in matches[:25]
+        ]
+
     # プレイリスト機能
     playlist_group = app_commands.Group(name='playlist', description='プレイリスト機能')
 
@@ -1052,6 +1079,7 @@ class Music(commands.Cog):
         url='YouTube URL（動画またはプレイリスト）',
         is_playlist='URL がYouTubeプレイリストの場合は True'
     )
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_add(self, interaction: discord.Interaction, name: str, url: str, is_playlist: bool = False):
         """プレイリストに曲を追加（または YouTube プレイリストをインポート）"""
         # URL バリデーション
@@ -1158,6 +1186,7 @@ class Music(commands.Cog):
 
     @playlist_group.command(name='play', description='プレイリストを再生（キューに追加）')
     @app_commands.describe(name='プレイリスト名')
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_play(self, interaction: discord.Interaction, name: str):
         """プレイリストの曲をキューに追加して再生"""
         user_id = str(interaction.user.id)
@@ -1199,6 +1228,7 @@ class Music(commands.Cog):
 
     @playlist_group.command(name='delete', description='プレイリストを削除')
     @app_commands.describe(name='プレイリスト名')
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_delete(self, interaction: discord.Interaction, name: str):
         """プレイリストを削除"""
         user_id = str(interaction.user.id)
@@ -1222,6 +1252,7 @@ class Music(commands.Cog):
         name='プレイリスト名',
         index='削除する曲のインデックス（1から始まる）'
     )
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_remove(self, interaction: discord.Interaction, name: str, index: int):
         """プレイリストから指定した曲を削除"""
         user_id = str(interaction.user.id)
@@ -1257,6 +1288,7 @@ class Music(commands.Cog):
 
     @playlist_group.command(name='share', description='プレイリストをコード化して共有')
     @app_commands.describe(name='プレイリスト名')
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_share(self, interaction: discord.Interaction, name: str):
         """プレイリストを共有可能なコード化形式で出力"""
         user_id = str(interaction.user.id)
@@ -1419,6 +1451,7 @@ class Music(commands.Cog):
 
     @playlist_group.command(name='list', description='プレイリスト一覧を表示')
     @app_commands.describe(name='プレイリスト名（指定時は詳細表示）')
+    @app_commands.autocomplete('name', playlist_name_autocomplete)
     async def playlist_list(self, interaction: discord.Interaction, name: str = None):
         """プレイリスト一覧を表示（詳細表示も可能）"""
         user_id = str(interaction.user.id)
