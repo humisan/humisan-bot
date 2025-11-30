@@ -57,11 +57,9 @@ class MusicPrefix(commands.Cog):
         # URL か キーワードか判定
         if 'youtube.com' in query or 'youtu.be' in query:
             # URL の場合は直接再生
-            await ctx.defer()
-            await music_cog._perform_play(ctx, query)
+            await music_cog._perform_play_prefix(ctx, query)
         else:
             # キーワードの場合は一番上の結果を自動的に再生
-            await ctx.defer()
             try:
                 songs = await music_cog.search_songs(query, limit=1)
 
@@ -75,7 +73,7 @@ class MusicPrefix(commands.Cog):
 
                 if song_url:
                     # URL を使って再生
-                    await music_cog._perform_play(ctx, song_url)
+                    await music_cog._perform_play_prefix(ctx, song_url)
                 else:
                     await ctx.send(embed=create_error_embed("曲の再生に失敗しました", "URL が取得できません"))
 
@@ -105,8 +103,6 @@ class MusicPrefix(commands.Cog):
         if not music_cog:
             await ctx.send(embed=create_error_embed("エラー", "Music Cog が見つかりません"))
             return
-
-        await ctx.defer()
 
         try:
             songs = await music_cog.search_songs(query, limit=20)

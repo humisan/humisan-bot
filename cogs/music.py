@@ -520,6 +520,149 @@ class Music(commands.Cog):
                 embed=create_error_embed("音楽の再生に失敗しました", str(e))
             )
 
+    async def _perform_play_prefix(self, ctx: commands.Context, url: str):
+        """プリフィックスコマンド用の再生処理（ctx を使用）"""
+        try:
+            voice_channel = ctx.author.voice.channel
+            voice_client = ctx.guild.voice_client
+
+            # ボイスチャネルに接続
+            if not voice_client:
+                voice_client = await voice_channel.connect()
+                # ボットをデフォン状態に設定
+                try:
+                    await ctx.guild.me.edit(deafen=True)
+                except discord.Forbidden:
+                    logger.warning("Failed to deafen bot: Missing 'Manage Members' permission")
+                except Exception as e:
+                    logger.warning(f"Failed to deafen bot: {str(e)}")
+
+            try:
+                # 曲情報を取得
+                loop = asyncio.get_event_loop()
+                try:
+                    data = await asyncio.wait_for(
+                        loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=False)),
+                        timeout=120
+                    )
+                except asyncio.TimeoutError:
+                    logger.error(f"Timeout while extracting video info for URL: {url}")
+                    await ctx.send(embed=create_error_embed(
+                        "曲の取得がタイムアウトしました",
+                        "YouTube から情報を取得するのに時間がかかりすぎています。別の曲を試してください。"
+                    ))
+                    return
+
+                # プレイリストまたは単一の曲を処理
+                songs_to_add = []
+
+                if 'entries' in data:
+                    # プレイリスト処理
+                    max_songs = 25
+                    for i, entry in enumerate(data['entries']):
+                        if len(songs_to_add) >= max_songs:
+                            break
+                        if entry:
+                            webpage_url = entry.get('webpage_url')
+                            if not webpage_url and entry.get('id'):
+                                webpage_url = f"https://www.youtube.com/watch?v={entry.get('id')}"
+                            if webpage_url:
+                                song = {
+                                    'url': entry.get('url'),
+                                    'title': entry.get('title', 'Unknown'),
+                                    'duration': entry.get('duration', 0),
+                                    'thumbnail': entry.get('thumbnail'),
+                                    'requester': ctx.author,
+                                    'webpage_url': webpage_url
+                                }
+                                songs_to_add.append(song)
+
+                    if not songs_to_add:
+                        await ctx.send(embed=create_error_embed("プレイリストが空です"))
+                        return
+                else:
+                    # 単一の曲
+                    webpage_url = data.get('webpage_url')
+                    if not webpage_url and data.get('id'):
+                        webpage_url = f"https://www.youtube.com/watch?v={data.get('id')}"
+                    song = {
+                        'url': data.get('url'),
+                        'title': data['title'],
+                        'duration': data.get('duration', 0),
+                        'thumbnail': data.get('thumbnail'),
+                        'requester': ctx.author,
+                        'webpage_url': webpage_url
+                    }
+                    songs_to_add.append(song)
+
+                queue = self.get_queue(ctx.guild.id)
+                first_song = songs_to_add[0]
+
+                # チャネル ID を保存
+                if queue.notification_channel_id is None:
+                    queue.notification_channel_id = ctx.channel.id
+
+                # キューに曲が入っていない場合のみ即座に再生
+                if queue.current is None and not voice_client.is_playing():
+                    player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.bot.loop, stream=True)
+                    voice_client.play(player, after=lambda e: self.play_next(ctx.guild))
+                    queue.current = first_song
+                    queue.start_time = time.time()
+
+                    # 再生履歴に記録
+                    try:
+                        self.db.record_music_history(
+                            user_id=str(ctx.author.id),
+                            title=first_song['title'],
+                            url=first_song['webpage_url'],
+                            genre=None,
+                            duration=first_song.get('duration')
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to record music history: {str(e)}")
+
+                    # 残りの曲をキューに追加
+                    for song in songs_to_add[1:]:
+                        queue.add(song)
+
+                    embed = discord.Embed(
+                        title="🎵 再生中",
+                        description=f"[{first_song['title']}]({first_song['webpage_url']})",
+                        color=discord.Color.blue()
+                    )
+                    if first_song['thumbnail']:
+                        embed.set_thumbnail(url=first_song['thumbnail'])
+                    embed.add_field(name="リクエスト", value=ctx.author.mention, inline=False)
+                    if first_song['duration']:
+                        embed.add_field(name="再生時間", value=self.format_duration(first_song['duration']), inline=False)
+                    if len(songs_to_add) > 1:
+                        embed.add_field(name="キューに追加", value=f"{len(songs_to_add) - 1} 曲", inline=False)
+
+                    await ctx.send(embed=embed)
+                else:
+                    # キューに追加
+                    for song in songs_to_add:
+                        queue.add(song)
+
+                    embed = discord.Embed(
+                        title="➕ キューに追加",
+                        description=f"[{first_song['title']}]({first_song['webpage_url']})",
+                        color=discord.Color.green()
+                    )
+                    queue_position = len(queue.queue) - len(songs_to_add) + 1
+                    embed.add_field(name="キューの位置", value=f"#{queue_position} ～ #{len(queue.queue)}", inline=False)
+                    embed.add_field(name="追加曲数", value=f"{len(songs_to_add)} 曲", inline=False)
+
+                    await ctx.send(embed=embed)
+
+            except Exception as e:
+                logger.error(f"Error playing music: {str(e)}")
+                await ctx.send(embed=create_error_embed("音楽の再生に失敗しました", str(e)))
+
+        except Exception as e:
+            logger.error(f"Error in _perform_play_prefix: {str(e)}")
+            await ctx.send(embed=create_error_embed("エラーが発生しました", str(e)))
+
     @app_commands.command(name='search', description='YouTube から曲を検索して再生します')
     @app_commands.describe(query='検索キーワード')
     async def search(self, interaction: discord.Interaction, query: str):
