@@ -38,7 +38,7 @@ YTDL_OPTIONS = {
         'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
     },
     'extract_flat': 'in_playlist',  # プレイリストの動画IDを高速に取得
-    'playlistend': 25,  # プレイリストから最初の25曲まで取得
+    'playlistend': 25,  # スラッシュコマンドで最初の25曲まで取得
     # YouTube の Bot 検出対策
     'youtube_include_dash_manifest': False,
     'quiet': True,
@@ -410,7 +410,6 @@ class Music(commands.Cog):
                 for i, entry in enumerate(data['entries']):
                     # 25曲に達したら終了
                     if len(songs_to_add) >= max_songs:
-                        is_playlist_limited = True
                         break
 
                     if entry:
@@ -1104,73 +1103,108 @@ class Music(commands.Cog):
             loop = asyncio.get_event_loop()
 
             if is_playlist:
-                # YouTube プレイリスト全体を取得
+                # YouTube プレイリスト全体を取得（制限なし）
+                # 最初に動画IDのリストを素早く取得
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': 'in_playlist',
-                    'playlistend': 100,  # 最大100曲まで取得
-                    'ignoreerrors': True,  # 利用できない動画をスキップ
-                    'skip_unavailable_fragments': True,
+                    'lazy_playlist': True,  # すべてのページを取得
+                    'skip_unavailable': True,  # 利用できない動画をスキップ
+                    'ignoreerrors': True,  # エラーを無視
+                    'socket_timeout': 30,
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+                    },
                 }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
 
-                if data is None or 'entries' not in data or not data['entries']:
-                    await interaction.followup.send(
-                        embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
-                    )
-                    return
+                    if data is None or 'entries' not in data or not data['entries']:
+                        await interaction.followup.send(
+                            embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
+                        )
+                        return
 
-                added_count = 0
-                failed_count = 0
-                unavailable_count = 0
+                    added_count = 0
+                    failed_count = 0
+                    unavailable_count = 0
 
-                for entry in data['entries']:
-                    try:
-                        if entry is None:
-                            unavailable_count += 1
-                            continue
+                    logger.info(f"Playlist extraction started with {len(data['entries'])} entries")
 
-                        video_id = entry.get('id')
-                        if not video_id:
-                            unavailable_count += 1
-                            continue
-
-                        video_url = f"https://www.youtube.com/watch?v={video_id}"
-
+                    for idx, entry in enumerate(data['entries'], 1):
                         try:
-                            # 動画情報を取得
-                            ydl_single = yt_dlp.YoutubeDL({
-                                'quiet': True,
-                                'no_warnings': True,
-                                'ignoreerrors': True,
-                            })
-                            video_data = await loop.run_in_executor(None, lambda: ydl_single.extract_info(video_url, download=False))
-
-                            if video_data is None:
-                                logger.debug(f"Video unavailable: {video_id}")
+                            if entry is None:
                                 unavailable_count += 1
                                 continue
 
-                            song = {
-                                'title': video_data.get('title', 'Unknown'),
-                                'url': video_data.get('url'),
-                                'webpage_url': video_data.get('webpage_url'),
-                                'duration': video_data.get('duration', 0)
-                            }
+                            video_id = entry.get('id')
+                            if not video_id:
+                                unavailable_count += 1
+                                continue
 
-                            self.playlists[user_id][name].append(song)
-                            added_count += 1
+                            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                            try:
+                                # 動画情報を取得
+                                ydl_single = yt_dlp.YoutubeDL({
+                                    'quiet': True,
+                                    'no_warnings': True,
+                                    'ignoreerrors': True,
+                                    'skip_unavailable': True,  # 利用不可な動画をスキップ
+                                    'socket_timeout': 30,
+                                    'no_color': True,  # カラー出力を無効化
+                                    'logger': logger,  # 標準エラーをログに出力
+                                    'http_headers': {
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                    },
+                                })
+                                video_data = await loop.run_in_executor(None, lambda: ydl_single.extract_info(video_url, download=False))
+
+                                if video_data is None:
+                                    logger.debug(f"Video unavailable: {video_id}")
+                                    unavailable_count += 1
+                                    continue
+
+                                # 必要なフィールドをチェック
+                                if not video_data.get('url') or not video_data.get('webpage_url'):
+                                    logger.debug(f"Video missing required fields: {video_id}")
+                                    unavailable_count += 1
+                                    continue
+
+                                song = {
+                                    'title': video_data.get('title', 'Unknown'),
+                                    'url': video_data.get('url'),
+                                    'webpage_url': video_data.get('webpage_url'),
+                                    'duration': video_data.get('duration', 0)
+                                }
+
+                                self.playlists[user_id][name].append(song)
+                                added_count += 1
+
+                                if idx % 50 == 0:
+                                    logger.info(f"Progress: {idx}/{len(data['entries'])} songs processed")
+                            except Exception as e:
+                                logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
+                                unavailable_count += 1
+                                continue
+
                         except Exception as e:
-                            logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
-                            unavailable_count += 1
+                            logger.warning(f"Error processing entry: {str(e)}")
+                            failed_count += 1
                             continue
 
-                    except Exception as e:
-                        logger.warning(f"Error processing entry: {str(e)}")
-                        failed_count += 1
-                        continue
+                except Exception as e:
+                    logger.error(f"Error extracting playlist info: {str(e)}")
+                    await interaction.followup.send(
+                        embed=create_error_embed(
+                            "プレイリスト取得エラー",
+                            f"プレイリスト情報の取得に失敗しました: {str(e)}"
+                        )
+                    )
+                    return
 
                 self.save_playlists()
 
@@ -1249,17 +1283,69 @@ class Music(commands.Cog):
             )
             return
 
+        # ボイスチャネル確認
+        try:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        except Exception as e:
+            logger.warning(f"Failed to fetch member: {e}")
+            member = None
+
+        if not member or not member.voice or not member.voice.channel:
+            await interaction.response.send_message(
+                embed=create_error_embed("ボイスチャネルに接続してください"),
+                ephemeral=True
+            )
+            return
+
+        voice_channel = member.voice.channel
+        voice_client = interaction.guild.voice_client
+
+        # ボイスチャネルに接続
+        if not voice_client:
+            voice_client = await voice_channel.connect()
+            # ボットをデフォン状態に設定（常にスピーカーミュート）
+            try:
+                await interaction.guild.me.edit(deafen=True)
+            except discord.Forbidden:
+                logger.warning("Failed to deafen bot: Missing 'Manage Members' permission")
+            except Exception as e:
+                logger.warning(f"Failed to deafen bot: {str(e)}")
+
+        await interaction.response.defer()
+
+        # キューの状態を確認
         queue = self.get_queue(interaction.guild.id)
 
-        for song in playlist:
-            queue.add(song)
+        # キューが空の場合は直接再生（/play コマンドと同じ動作）
+        if queue.current is None and not voice_client.is_playing():
+            # プレイリストの再生処理を実行
+            try:
+                # シャッフル選択ビューを表示して再生
+                view = PlaylistShuffleView(self, interaction, playlist, name, playlist[0], voice_client)
+                embed = discord.Embed(
+                    title="🎵 プレイリスト再生",
+                    description=f"「{name}」を再生します",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
+                embed.add_field(name="再生方法を選択してください", value="シャッフルまたは通常再生", inline=False)
+                await interaction.followup.send(embed=embed, view=view)
+            except Exception as e:
+                logger.error(f"Error in playlist play: {str(e)}")
+                await interaction.followup.send(
+                    embed=create_error_embed("再生エラー", f"プレイリストの再生に失敗しました: {str(e)}")
+                )
+        else:
+            # キューに曲が入っている、または既に再生中の場合は無条件に追加
+            for song in playlist:
+                queue.add(song)
 
-        await interaction.response.send_message(
-            embed=create_success_embed(
-                "🎵 プレイリスト再生",
-                f"「{name}」の {len(playlist)} 曲をキューに追加しました"
+            await interaction.followup.send(
+                embed=create_success_embed(
+                    "🎵 プレイリスト追加",
+                    f"「{name}」の {len(playlist)} 曲をキューに追加しました"
+                )
             )
-        )
 
     @playlist_group.command(name='delete', description='プレイリストを削除')
     @app_commands.describe(name='プレイリスト名')
@@ -1548,6 +1634,120 @@ class Music(commands.Cog):
             embed.set_footer(text=f"全{len(playlists)}個のプレイリスト、全{total_songs}曲 | /playlist list <プレイリスト名> で詳細表示")
 
             await interaction.response.send_message(embed=embed)
+
+
+class PlaylistShuffleView(discord.ui.View):
+    """プレイリスト再生時のシャッフル選択ビュー"""
+
+    def __init__(self, music_cog, interaction, playlist, playlist_name, first_song, voice_client):
+        super().__init__(timeout=None)  # タイムアウトなし
+        self.music_cog = music_cog
+        self.interaction = interaction
+        self.playlist = playlist
+        self.playlist_name = playlist_name
+        self.first_song = first_song
+        self.voice_client = voice_client
+        self.shuffle = False
+
+    @discord.ui.button(label="🔀 シャッフル", style=discord.ButtonStyle.primary)
+    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """シャッフル再生"""
+        self.shuffle = True
+        await interaction.response.defer()
+        await self._play_playlist()
+
+    @discord.ui.button(label="📋 通常再生", style=discord.ButtonStyle.secondary)
+    async def normal_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """通常再生"""
+        self.shuffle = False
+        await interaction.response.defer()
+        await self._play_playlist()
+
+    async def _play_playlist(self):
+        """プレイリストを再生"""
+        try:
+            user_id = str(self.interaction.user.id)
+            queue = self.music_cog.get_queue(self.interaction.guild.id)
+
+            # プレイリストをコピーして準備
+            songs_to_play = list(self.playlist)
+
+            if self.shuffle:
+                # 最初の曲以外をシャッフル
+                remaining_songs = songs_to_play[1:]
+                import random
+                random.shuffle(remaining_songs)
+                songs_to_play = [songs_to_play[0]] + remaining_songs
+
+            first_song = songs_to_play[0]
+
+            # デバッグログ
+            logger.info(f"Playing playlist: {self.playlist_name}")
+            logger.info(f"First song: {first_song}")
+            logger.info(f"Shuffle: {self.shuffle}, Songs count: {len(songs_to_play)}")
+
+            # チャネル ID を保存（通知用）
+            if queue.notification_channel_id is None:
+                queue.notification_channel_id = self.interaction.channel.id
+
+            # キューに曲が入っていない場合のみ即座に再生
+            if queue.current is None and not self.voice_client.is_playing():
+                player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.music_cog.bot.loop, stream=True)
+                self.voice_client.play(player, after=lambda e: self.music_cog.play_next(self.interaction.guild))
+                queue.current = first_song
+                queue.start_time = time.time()
+
+                # 再生履歴に記録
+                try:
+                    self.music_cog.db.record_music_history(
+                        user_id=user_id,
+                        title=first_song['title'],
+                        url=first_song['webpage_url'],
+                        genre=None,
+                        duration=first_song.get('duration')
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record music history: {str(e)}")
+
+                # 残りの曲をキューに追加
+                for song in songs_to_play[1:]:
+                    queue.add(song)
+
+                embed = discord.Embed(
+                    title="🎵 再生中",
+                    description=f"[{first_song['title']}]({first_song['webpage_url']})",
+                    color=discord.Color.blue()
+                )
+                if first_song.get('thumbnail'):
+                    embed.set_thumbnail(url=first_song['thumbnail'])
+                embed.add_field(name="プレイリスト", value=self.playlist_name, inline=False)
+                embed.add_field(name="曲数", value=f"{len(songs_to_play)} 曲", inline=False)
+                if self.shuffle:
+                    embed.add_field(name="モード", value="🔀 シャッフル", inline=False)
+                if first_song.get('duration'):
+                    embed.add_field(name="再生時間", value=self.music_cog.format_duration(first_song['duration']), inline=False)
+
+                await self.interaction.followup.send(embed=embed)
+            else:
+                # キューに曲が入っている、または既に再生中の場合
+                for song in songs_to_play:
+                    queue.add(song)
+
+                await self.interaction.followup.send(
+                    embed=create_success_embed(
+                        "🎵 プレイリスト追加",
+                        f"「{self.playlist_name}」の {len(songs_to_play)} 曲をキューに追加しました"
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Error playing playlist: {str(e)}")
+            await self.interaction.followup.send(
+                embed=create_error_embed(
+                    "再生エラー",
+                    f"プレイリストの再生に失敗しました: {str(e)}"
+                )
+            )
 
 
 class MusicControlView(discord.ui.View):
