@@ -1276,61 +1276,22 @@ class Music(commands.Cog):
                 logger.warning(f"Failed to deafen bot: {str(e)}")
 
         await interaction.response.defer()
+
+        # キューが空の場合はシャッフル選択を表示
         queue = self.get_queue(interaction.guild.id)
-        first_song = playlist[0]
-
-        # チャネル ID を保存（通知用）
-        if queue.notification_channel_id is None:
-            queue.notification_channel_id = interaction.channel.id
-
-        # キューに曲が入っていない場合のみ即座に再生
         if queue.current is None and not voice_client.is_playing():
-            try:
-                player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.bot.loop, stream=True)
-                voice_client.play(player, after=lambda e: self.play_next(interaction.guild))
-                queue.current = first_song
-                queue.start_time = time.time()
-
-                # 再生履歴に記録
-                try:
-                    self.db.record_music_history(
-                        user_id=user_id,
-                        title=first_song['title'],
-                        url=first_song['webpage_url'],
-                        genre=None,
-                        duration=first_song.get('duration')
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to record music history: {str(e)}")
-
-                # 残りの曲をキューに追加
-                for song in playlist[1:]:
-                    queue.add(song)
-
-                embed = discord.Embed(
-                    title="🎵 再生中",
-                    description=f"[{first_song['title']}]({first_song['webpage_url']})",
-                    color=discord.Color.blue()
-                )
-                if first_song.get('thumbnail'):
-                    embed.set_thumbnail(url=first_song['thumbnail'])
-                embed.add_field(name="プレイリスト", value=name, inline=False)
-                embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
-                if first_song.get('duration'):
-                    embed.add_field(name="再生時間", value=self.format_duration(first_song['duration']), inline=False)
-
-                await interaction.followup.send(embed=embed)
-
-            except Exception as e:
-                logger.error(f"Error playing playlist: {str(e)}")
-                await interaction.followup.send(
-                    embed=create_error_embed(
-                        "再生エラー",
-                        f"プレイリストの再生に失敗しました: {str(e)}"
-                    )
-                )
+            # シャッフル選択ビューを表示
+            view = PlaylistShuffleView(self, interaction, playlist, name, playlist[0], voice_client)
+            embed = discord.Embed(
+                title="🎵 プレイリスト再生",
+                description=f"「{name}」を再生します",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
+            embed.add_field(name="再生方法を選択してください", value="シャッフルまたは通常再生", inline=False)
+            await interaction.followup.send(embed=embed, view=view)
         else:
-            # キューに曲が入っている、または既に再生中の場合
+            # キューに曲が入っている、または既に再生中の場合は無条件に追加
             for song in playlist:
                 queue.add(song)
 
@@ -1628,6 +1589,121 @@ class Music(commands.Cog):
             embed.set_footer(text=f"全{len(playlists)}個のプレイリスト、全{total_songs}曲 | /playlist list <プレイリスト名> で詳細表示")
 
             await interaction.response.send_message(embed=embed)
+
+
+class PlaylistShuffleView(discord.ui.View):
+    """プレイリスト再生時のシャッフル選択ビュー"""
+
+    def __init__(self, music_cog, interaction, playlist, playlist_name, first_song, voice_client):
+        super().__init__(timeout=60)
+        self.music_cog = music_cog
+        self.interaction = interaction
+        self.playlist = playlist
+        self.playlist_name = playlist_name
+        self.first_song = first_song
+        self.voice_client = voice_client
+        self.shuffle = False
+
+    @discord.ui.button(label="🔀 シャッフル", style=discord.ButtonStyle.primary)
+    async def shuffle_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """シャッフル再生"""
+        self.shuffle = True
+        await interaction.response.defer()
+        await self._play_playlist()
+
+    @discord.ui.button(label="📋 通常再生", style=discord.ButtonStyle.secondary)
+    async def normal_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """通常再生"""
+        self.shuffle = False
+        await interaction.response.defer()
+        await self._play_playlist()
+
+    async def _play_playlist(self):
+        """プレイリストを再生"""
+        try:
+            user_id = str(self.interaction.user.id)
+            queue = self.music_cog.get_queue(self.interaction.guild.id)
+
+            # プレイリストをコピーして準備
+            songs_to_play = list(self.playlist)
+
+            if self.shuffle:
+                # 最初の曲以外をシャッフル
+                remaining_songs = songs_to_play[1:]
+                import random
+                random.shuffle(remaining_songs)
+                songs_to_play = [songs_to_play[0]] + remaining_songs
+
+            first_song = songs_to_play[0]
+
+            # チャネル ID を保存（通知用）
+            if queue.notification_channel_id is None:
+                queue.notification_channel_id = self.interaction.channel.id
+
+            # キューに曲が入っていない場合のみ即座に再生
+            if queue.current is None and not self.voice_client.is_playing():
+                player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.music_cog.bot.loop, stream=True)
+                self.voice_client.play(player, after=lambda e: self.music_cog.play_next(self.interaction.guild))
+                queue.current = first_song
+                queue.start_time = time.time()
+
+                # 再生履歴に記録
+                try:
+                    self.music_cog.db.record_music_history(
+                        user_id=user_id,
+                        title=first_song['title'],
+                        url=first_song['webpage_url'],
+                        genre=None,
+                        duration=first_song.get('duration')
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record music history: {str(e)}")
+
+                # 残りの曲をキューに追加
+                for song in songs_to_play[1:]:
+                    queue.add(song)
+
+                embed = discord.Embed(
+                    title="🎵 再生中",
+                    description=f"[{first_song['title']}]({first_song['webpage_url']})",
+                    color=discord.Color.blue()
+                )
+                if first_song.get('thumbnail'):
+                    embed.set_thumbnail(url=first_song['thumbnail'])
+                embed.add_field(name="プレイリスト", value=self.playlist_name, inline=False)
+                embed.add_field(name="曲数", value=f"{len(songs_to_play)} 曲", inline=False)
+                if self.shuffle:
+                    embed.add_field(name="モード", value="🔀 シャッフル", inline=False)
+                if first_song.get('duration'):
+                    embed.add_field(name="再生時間", value=self.music_cog.format_duration(first_song['duration']), inline=False)
+
+                await self.interaction.followup.send(embed=embed)
+            else:
+                # キューに曲が入っている、または既に再生中の場合
+                for song in songs_to_play:
+                    queue.add(song)
+
+                await self.interaction.followup.send(
+                    embed=create_success_embed(
+                        "🎵 プレイリスト追加",
+                        f"「{self.playlist_name}」の {len(songs_to_play)} 曲をキューに追加しました"
+                    )
+                )
+
+        except Exception as e:
+            logger.error(f"Error playing playlist: {str(e)}")
+            await self.interaction.followup.send(
+                embed=create_error_embed(
+                    "再生エラー",
+                    f"プレイリストの再生に失敗しました: {str(e)}"
+                )
+            )
+
+    async def on_timeout(self):
+        """タイムアウト時の処理"""
+        # タイムアウト時は通常再生
+        self.shuffle = False
+        await self._play_playlist()
 
 
 class MusicControlView(discord.ui.View):
