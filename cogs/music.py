@@ -1815,6 +1815,11 @@ class PlaylistShuffleView(discord.ui.View):
             # プレイリストをコピーして準備
             songs_to_play = list(self.playlist)
 
+            # 各曲に requester を追加（次の曲の通知用）
+            for song in songs_to_play:
+                if 'requester' not in song:
+                    song['requester'] = self.interaction.user
+
             if self.shuffle:
                 # 最初の曲以外をシャッフル
                 remaining_songs = songs_to_play[1:]
