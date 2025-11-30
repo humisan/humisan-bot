@@ -1153,7 +1153,10 @@ class Music(commands.Cog):
                                     'quiet': True,
                                     'no_warnings': True,
                                     'ignoreerrors': True,
+                                    'skip_unavailable': True,  # 利用不可な動画をスキップ
                                     'socket_timeout': 30,
+                                    'no_color': True,  # カラー出力を無効化
+                                    'logger': logger,  # 標準エラーをログに出力
                                     'http_headers': {
                                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                                     },
@@ -1162,6 +1165,12 @@ class Music(commands.Cog):
 
                                 if video_data is None:
                                     logger.debug(f"Video unavailable: {video_id}")
+                                    unavailable_count += 1
+                                    continue
+
+                                # 必要なフィールドをチェック
+                                if not video_data.get('url') or not video_data.get('webpage_url'):
+                                    logger.debug(f"Video missing required fields: {video_id}")
                                     unavailable_count += 1
                                     continue
 
@@ -1304,25 +1313,28 @@ class Music(commands.Cog):
 
         await interaction.response.defer()
 
-        # キューが空の場合はシャッフル選択を表示
+        # キューの状態を確認
         queue = self.get_queue(interaction.guild.id)
 
-        # ボイスクライアントが再生していない場合、キューの状態を正しくリセット
-        if not voice_client.is_playing():
-            queue.current = None
-            queue.queue.clear()
-
+        # キューが空の場合は直接再生（/play コマンドと同じ動作）
         if queue.current is None and not voice_client.is_playing():
-            # シャッフル選択ビューを表示
-            view = PlaylistShuffleView(self, interaction, playlist, name, playlist[0], voice_client)
-            embed = discord.Embed(
-                title="🎵 プレイリスト再生",
-                description=f"「{name}」を再生します",
-                color=discord.Color.blue()
-            )
-            embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
-            embed.add_field(name="再生方法を選択してください", value="シャッフルまたは通常再生", inline=False)
-            await interaction.followup.send(embed=embed, view=view)
+            # プレイリストの再生処理を実行
+            try:
+                # シャッフル選択ビューを表示して再生
+                view = PlaylistShuffleView(self, interaction, playlist, name, playlist[0], voice_client)
+                embed = discord.Embed(
+                    title="🎵 プレイリスト再生",
+                    description=f"「{name}」を再生します",
+                    color=discord.Color.blue()
+                )
+                embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
+                embed.add_field(name="再生方法を選択してください", value="シャッフルまたは通常再生", inline=False)
+                await interaction.followup.send(embed=embed, view=view)
+            except Exception as e:
+                logger.error(f"Error in playlist play: {str(e)}")
+                await interaction.followup.send(
+                    embed=create_error_embed("再生エラー", f"プレイリストの再生に失敗しました: {str(e)}")
+                )
         else:
             # キューに曲が入っている、または既に再生中の場合は無条件に追加
             for song in playlist:
@@ -1668,6 +1680,11 @@ class PlaylistShuffleView(discord.ui.View):
                 songs_to_play = [songs_to_play[0]] + remaining_songs
 
             first_song = songs_to_play[0]
+
+            # デバッグログ
+            logger.info(f"Playing playlist: {self.playlist_name}")
+            logger.info(f"First song: {first_song}")
+            logger.info(f"Shuffle: {self.shuffle}, Songs count: {len(songs_to_play)}")
 
             # チャネル ID を保存（通知用）
             if queue.notification_channel_id is None:
