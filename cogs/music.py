@@ -1104,77 +1104,98 @@ class Music(commands.Cog):
 
             if is_playlist:
                 # YouTube プレイリスト全体を取得（制限なし）
+                # 最初に動画IDのリストを素早く取得
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': 'in_playlist',
                     'lazy_playlist': True,  # すべてのページを取得
-                    'ignoreerrors': True,  # 利用できない動画をスキップ
-                    'skip_unavailable_fragments': True,
+                    'skip_unavailable': True,  # 利用できない動画をスキップ
+                    'ignoreerrors': True,  # エラーを無視
                     'socket_timeout': 30,
                     'http_headers': {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                         'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
                     },
                 }
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
 
-                if data is None or 'entries' not in data or not data['entries']:
-                    await interaction.followup.send(
-                        embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
-                    )
-                    return
+                    if data is None or 'entries' not in data or not data['entries']:
+                        await interaction.followup.send(
+                            embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
+                        )
+                        return
 
-                added_count = 0
-                failed_count = 0
-                unavailable_count = 0
+                    added_count = 0
+                    failed_count = 0
+                    unavailable_count = 0
 
-                for entry in data['entries']:
-                    try:
-                        if entry is None:
-                            unavailable_count += 1
-                            continue
+                    logger.info(f"Playlist extraction started with {len(data['entries'])} entries")
 
-                        video_id = entry.get('id')
-                        if not video_id:
-                            unavailable_count += 1
-                            continue
-
-                        video_url = f"https://www.youtube.com/watch?v={video_id}"
-
+                    for idx, entry in enumerate(data['entries'], 1):
                         try:
-                            # 動画情報を取得
-                            ydl_single = yt_dlp.YoutubeDL({
-                                'quiet': True,
-                                'no_warnings': True,
-                                'ignoreerrors': True,
-                            })
-                            video_data = await loop.run_in_executor(None, lambda: ydl_single.extract_info(video_url, download=False))
-
-                            if video_data is None:
-                                logger.debug(f"Video unavailable: {video_id}")
+                            if entry is None:
                                 unavailable_count += 1
                                 continue
 
-                            song = {
-                                'title': video_data.get('title', 'Unknown'),
-                                'url': video_data.get('url'),
-                                'webpage_url': video_data.get('webpage_url'),
-                                'duration': video_data.get('duration', 0)
-                            }
+                            video_id = entry.get('id')
+                            if not video_id:
+                                unavailable_count += 1
+                                continue
 
-                            self.playlists[user_id][name].append(song)
-                            added_count += 1
+                            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+                            try:
+                                # 動画情報を取得
+                                ydl_single = yt_dlp.YoutubeDL({
+                                    'quiet': True,
+                                    'no_warnings': True,
+                                    'ignoreerrors': True,
+                                    'socket_timeout': 30,
+                                    'http_headers': {
+                                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                                    },
+                                })
+                                video_data = await loop.run_in_executor(None, lambda: ydl_single.extract_info(video_url, download=False))
+
+                                if video_data is None:
+                                    logger.debug(f"Video unavailable: {video_id}")
+                                    unavailable_count += 1
+                                    continue
+
+                                song = {
+                                    'title': video_data.get('title', 'Unknown'),
+                                    'url': video_data.get('url'),
+                                    'webpage_url': video_data.get('webpage_url'),
+                                    'duration': video_data.get('duration', 0)
+                                }
+
+                                self.playlists[user_id][name].append(song)
+                                added_count += 1
+
+                                if idx % 50 == 0:
+                                    logger.info(f"Progress: {idx}/{len(data['entries'])} songs processed")
+                            except Exception as e:
+                                logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
+                                unavailable_count += 1
+                                continue
+
                         except Exception as e:
-                            logger.debug(f"Failed to fetch video {video_id}: {str(e)}")
-                            unavailable_count += 1
+                            logger.warning(f"Error processing entry: {str(e)}")
+                            failed_count += 1
                             continue
 
-                    except Exception as e:
-                        logger.warning(f"Error processing entry: {str(e)}")
-                        failed_count += 1
-                        continue
+                except Exception as e:
+                    logger.error(f"Error extracting playlist info: {str(e)}")
+                    await interaction.followup.send(
+                        embed=create_error_embed(
+                            "プレイリスト取得エラー",
+                            f"プレイリスト情報の取得に失敗しました: {str(e)}"
+                        )
+                    )
+                    return
 
                 self.save_playlists()
 
@@ -1285,6 +1306,12 @@ class Music(commands.Cog):
 
         # キューが空の場合はシャッフル選択を表示
         queue = self.get_queue(interaction.guild.id)
+
+        # ボイスクライアントが再生していない場合、キューの状態を正しくリセット
+        if not voice_client.is_playing():
+            queue.current = None
+            queue.queue.clear()
+
         if queue.current is None and not voice_client.is_playing():
             # シャッフル選択ビューを表示
             view = PlaylistShuffleView(self, interaction, playlist, name, playlist[0], voice_client)
