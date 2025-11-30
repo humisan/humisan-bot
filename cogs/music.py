@@ -38,11 +38,8 @@ YTDL_OPTIONS = {
         'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
     },
     'extract_flat': 'in_playlist',  # プレイリストの動画IDを高速に取得
-    'playlistend': 25,  # プレイリストから最初の25曲まで取得
     # YouTube の Bot 検出対策
     'youtube_include_dash_manifest': False,
-    'quiet': True,
-    'no_warnings': True,
     'skip_unavailable_fragments': True,
 }
 
@@ -398,21 +395,15 @@ class Music(commands.Cog):
             # 曲数を取得してログに出力
             if 'entries' in data:
                 total_songs = len(data.get('entries', []))
-                logger.info(f"Playlist detected: Fetched {total_songs} songs (max 25 songs per playlist)")
+                logger.info(f"Playlist detected: Fetched {total_songs} songs")
             else:
                 logger.info(f"Single song detected: {data.get('title', 'Unknown')}")
 
             if 'entries' in data:
-                # プレイリストの場合（最大25曲まで）
-                max_songs = 25
+                # プレイリストの場合（制限なし）
                 total_entries = len(data.get('entries', []))
 
                 for i, entry in enumerate(data['entries']):
-                    # 25曲に達したら終了
-                    if len(songs_to_add) >= max_songs:
-                        is_playlist_limited = True
-                        break
-
                     if entry:
                         # extract_flat を使用している場合、webpage_url が None になる可能性があるので、id から URL を構築
                         webpage_url = entry.get('webpage_url')
@@ -1104,12 +1095,11 @@ class Music(commands.Cog):
             loop = asyncio.get_event_loop()
 
             if is_playlist:
-                # YouTube プレイリスト全体を取得
+                # YouTube プレイリスト全体を取得（制限なし）
                 ydl_opts = {
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': 'in_playlist',
-                    'playlistend': 100,  # 最大100曲まで取得
                     'ignoreerrors': True,  # 利用できない動画をスキップ
                     'skip_unavailable_fragments': True,
                 }
