@@ -12,8 +12,13 @@ import os
 import random
 from enum import Enum
 import time
+from dotenv import load_dotenv
 
+load_dotenv()
 logger = setup_logger(__name__)
+
+# YouTube クッキーパス（オプション）
+YOUTUBE_COOKIES_PATH = os.getenv('YOUTUBE_COOKIES_PATH')
 
 # yt-dlpの設定
 YTDL_OPTIONS = {
@@ -28,12 +33,23 @@ YTDL_OPTIONS = {
     'default_search': 'auto',
     'source_address': '0.0.0.0',
     'socket_timeout': 30,  # タイムアウト時間（秒）
-    'http_headers': {  # ヘッダーを追加
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    'http_headers': {  # ブラウザのようなヘッダーを追加
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
     },
     'extract_flat': 'in_playlist',  # プレイリストの動画IDを高速に取得
     'playlistend': 25,  # プレイリストから最初の25曲まで取得
+    # YouTube の Bot 検出対策
+    'youtube_include_dash_manifest': False,
+    'quiet': True,
+    'no_warnings': True,
+    'skip_unavailable_fragments': True,
 }
+
+# YouTube クッキーが設定されている場合は追加
+if YOUTUBE_COOKIES_PATH and os.path.exists(YOUTUBE_COOKIES_PATH):
+    YTDL_OPTIONS['cookiefile'] = YOUTUBE_COOKIES_PATH
+    logger.info(f"YouTube cookies loaded from: {YOUTUBE_COOKIES_PATH}")
 
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
