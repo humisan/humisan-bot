@@ -112,13 +112,13 @@ class Utility(commands.Cog):
         try:
             embed = discord.Embed(
                 title="🤖 ボットのコマンド一覧",
-                description="すべてのコマンドはスラッシュコマンド（/）で実行します",
+                description="スラッシュコマンド（/）またはプレフィックスコマンド（h!）で実行できます",
                 color=discord.Color.blue(),
                 timestamp=discord.utils.utcnow()
             )
 
-            # 音楽機能
-            music_commands = [
+            # 音楽機能 - スラッシュコマンド
+            slash_music_commands = [
                 "`/play <URL>` - YouTube URL から曲を再生",
                 "`/search <キーワード>` - 曲を検索して再生",
                 "`/nowplaying` - 再生中の曲を表示",
@@ -134,7 +134,18 @@ class Utility(commands.Cog):
                 "`/favorites` - お気に入り一覧表示",
                 "`/leave` - ボイスチャネルから退出"
             ]
-            embed.add_field(name="🎵 音楽", value="\n".join(music_commands), inline=False)
+            embed.add_field(name="🎵 音楽コマンド (スラッシュ)", value="\n".join(slash_music_commands), inline=False)
+
+            # 音楽機能 - プレフィックスコマンド
+            prefix_music_commands = [
+                "`h!p [URL or キーワード]` - 曲を再生（URL or 検索）",
+                "`h!search <キーワード>` - 曲を検索",
+                "`h!np` - 現在再生中の曲を表示",
+                "`h!pause` - 一時停止/再開（トグル）",
+                "`h!skip [数字]` - スキップ（デフォルト1曲）",
+                "`h!vol [+/-数字]` - 音量調整（相対値）"
+            ]
+            embed.add_field(name="🎵 音楽コマンド (プレフィックス)", value="\n".join(prefix_music_commands), inline=False)
 
             # プレイリスト機能
             playlist_commands = [
