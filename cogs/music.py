@@ -1108,8 +1108,14 @@ class Music(commands.Cog):
                     'quiet': True,
                     'no_warnings': True,
                     'extract_flat': 'in_playlist',
+                    'lazy_playlist': True,  # すべてのページを取得
                     'ignoreerrors': True,  # 利用できない動画をスキップ
                     'skip_unavailable_fragments': True,
+                    'socket_timeout': 30,
+                    'http_headers': {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                        'Accept-Language': 'ja-JP,ja;q=0.9,en;q=0.8',
+                    },
                 }
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
