@@ -1249,17 +1249,99 @@ class Music(commands.Cog):
             )
             return
 
-        queue = self.get_queue(interaction.guild.id)
+        # ボイスチャネル確認
+        try:
+            member = await interaction.guild.fetch_member(interaction.user.id)
+        except Exception as e:
+            logger.warning(f"Failed to fetch member: {e}")
+            member = None
 
-        for song in playlist:
-            queue.add(song)
-
-        await interaction.response.send_message(
-            embed=create_success_embed(
-                "🎵 プレイリスト再生",
-                f"「{name}」の {len(playlist)} 曲をキューに追加しました"
+        if not member or not member.voice or not member.voice.channel:
+            await interaction.response.send_message(
+                embed=create_error_embed("ボイスチャネルに接続してください"),
+                ephemeral=True
             )
-        )
+            return
+
+        voice_channel = member.voice.channel
+        voice_client = interaction.guild.voice_client
+
+        # ボイスチャネルに接続
+        if not voice_client:
+            voice_client = await voice_channel.connect()
+            # ボットをデフォン状態に設定（常にスピーカーミュート）
+            try:
+                await interaction.guild.me.edit(deafen=True)
+            except discord.Forbidden:
+                logger.warning("Failed to deafen bot: Missing 'Manage Members' permission")
+            except Exception as e:
+                logger.warning(f"Failed to deafen bot: {str(e)}")
+
+        await interaction.response.defer()
+        queue = self.get_queue(interaction.guild.id)
+        first_song = playlist[0]
+
+        # チャネル ID を保存（通知用）
+        if queue.notification_channel_id is None:
+            queue.notification_channel_id = interaction.channel.id
+
+        # キューに曲が入っていない場合のみ即座に再生
+        if queue.current is None and not voice_client.is_playing():
+            try:
+                player = await YTDLSource.from_url(first_song['webpage_url'], loop=self.bot.loop, stream=True)
+                voice_client.play(player, after=lambda e: self.play_next(interaction.guild))
+                queue.current = first_song
+                queue.start_time = time.time()
+
+                # 再生履歴に記録
+                try:
+                    self.db.record_music_history(
+                        user_id=user_id,
+                        title=first_song['title'],
+                        url=first_song['webpage_url'],
+                        genre=None,
+                        duration=first_song.get('duration')
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record music history: {str(e)}")
+
+                # 残りの曲をキューに追加
+                for song in playlist[1:]:
+                    queue.add(song)
+
+                embed = discord.Embed(
+                    title="🎵 再生中",
+                    description=f"[{first_song['title']}]({first_song['webpage_url']})",
+                    color=discord.Color.blue()
+                )
+                if first_song.get('thumbnail'):
+                    embed.set_thumbnail(url=first_song['thumbnail'])
+                embed.add_field(name="プレイリスト", value=name, inline=False)
+                embed.add_field(name="曲数", value=f"{len(playlist)} 曲", inline=False)
+                if first_song.get('duration'):
+                    embed.add_field(name="再生時間", value=self.format_duration(first_song['duration']), inline=False)
+
+                await interaction.followup.send(embed=embed)
+
+            except Exception as e:
+                logger.error(f"Error playing playlist: {str(e)}")
+                await interaction.followup.send(
+                    embed=create_error_embed(
+                        "再生エラー",
+                        f"プレイリストの再生に失敗しました: {str(e)}"
+                    )
+                )
+        else:
+            # キューに曲が入っている、または既に再生中の場合
+            for song in playlist:
+                queue.add(song)
+
+            await interaction.followup.send(
+                embed=create_success_embed(
+                    "🎵 プレイリスト追加",
+                    f"「{name}」の {len(playlist)} 曲をキューに追加しました"
+                )
+            )
 
     @playlist_group.command(name='delete', description='プレイリストを削除')
     @app_commands.describe(name='プレイリスト名')
