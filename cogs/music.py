@@ -1240,7 +1240,14 @@ class Music(commands.Cog):
             )
             return
 
-        await interaction.response.defer()
+        # 初回応答を送信（プレイリスト取得開始）
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="✅ プレイリスト取得中...",
+                description="YouTube プレイリスト情報を取得しています",
+                color=discord.Color.blue()
+            )
+        )
 
         try:
             loop = asyncio.get_event_loop()
