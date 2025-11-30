@@ -61,6 +61,39 @@
 - `/stats` - あなたの再生統計を表示
 - `/recommend` - 再生履歴から曲をおすすめ
 
+#### プレイリスト管理コマンド
+- `/playlist create [名前]` - 新しいプレイリストを作成
+- `/playlist add [名前] [URL]` - プレイリストに曲を追加
+  - `is_playlist: True` で YouTube プレイリスト全体を一括インポート
+- `/playlist play [名前]` - プレイリストをキューに追加して再生
+- `/playlist list` - 全プレイリストを表示
+- `/playlist list [名前]` - 特定プレイリストの曲を表示（最大20曲）
+- `/playlist remove [名前] [番号]` - プレイリストから曲を削除
+- `/playlist delete [名前]` - プレイリストを削除
+- `/playlist share [名前]` - プレイリストを共有コードに変換
+- `/playlist import [コード]` - 共有コードからプレイリストをインポート
+
+**プレイリスト機能の使い方:**
+```
+# 1. プレイリストを作成
+/playlist create MyPlaylist
+
+# 2. YouTube の URL を追加（単一曲）
+/playlist add MyPlaylist https://www.youtube.com/watch?v=...
+
+# 3. YouTube プレイリスト全体をインポート（is_playlist=True）
+/playlist add MyPlaylist https://www.youtube.com/playlist?list=... is_playlist:True
+
+# 4. プレイリストを再生
+/playlist play MyPlaylist
+
+# 5. プレイリストを共有
+/playlist share MyPlaylist
+
+# 6. 共有コードをインポート
+/playlist import [共有コード]
+```
+
 #### プレフィックスコマンド (h!)
 快速操作用のプレフィックスコマンド：
 - `h!p [URL or キーワード]` - 曲を再生（URL で直接再生または検索キーワード）
