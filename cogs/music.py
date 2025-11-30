@@ -1116,7 +1116,7 @@ class Music(commands.Cog):
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     data = await loop.run_in_executor(None, lambda: ydl.extract_info(url, download=False))
 
-                if 'entries' not in data or not data['entries']:
+                if data is None or 'entries' not in data or not data['entries']:
                     await interaction.followup.send(
                         embed=create_error_embed("プレイリストが空です", "動画が含まれていません")
                     )
